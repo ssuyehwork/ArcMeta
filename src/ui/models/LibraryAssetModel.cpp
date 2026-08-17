@@ -274,7 +274,6 @@ Qt::ItemFlags LibraryAssetModel::flags(const QModelIndex& index) const {
 }
 
 void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
-    // 内存模式：穿透 .arc 搜寻高清缩略图与宽高比
     std::vector<std::pair<QString, QString>> newQueue;
     for (int r : rows) {
         if (r < 0 || r >= static_cast<int>(m_allRecords.size())) continue;
@@ -288,13 +287,11 @@ void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
             needLoad = true;
         }
 
-        // 🚨 核心防爆锁：如果正在后台处理排队中，立刻 0 毫秒跳过！
         if (m_requestedIcons.contains(path)) {
             needLoad = false;
         }
 
         if (needLoad) {
-            // 🚨 0 毫秒瞬间上锁！阻断高频重复开启渲染进程！
             m_requestedIcons.insert(path);
             newQueue.push_back({path, path});
         }
@@ -303,10 +300,10 @@ void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
     if (newQueue.empty()) return;
 
     QPointer<LibraryAssetModel> weakThis(this);
-    (void)QtConcurrent::run([weakThis, newQueue]() {
-        for (const auto& task : newQueue) {
-            if (!weakThis) break;
-            QString path = task.first;
+    for (const auto& task : newQueue) {
+        QString path = task.first;
+        (void)QtConcurrent::run([weakThis, path]() {
+            if (!weakThis) return;
             QFileInfo info(path);
             QString ext = info.suffix().toLower();
 
@@ -314,26 +311,15 @@ void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
             double ar = 1.0;
             bool hasThumb = false;
 
-            bool isInsideArc = info.dir().dirName().endsWith(".arc", Qt::CaseInsensitive);
+            bool isInsideArc = path.contains(".arc/", Qt::CaseInsensitive) || path.contains(".arc\\", Qt::CaseInsensitive);
 
-            if (isInsideArc || ext == "svg" || ext == "psd" || ext == "psb" || ext == "ai" || ext == "eps") {
-                // 🚨 管道二单线直达：直接调用 CapsuleMediaExtractor 只读版本，零分支判断！
+            if (isInsideArc || ext == "svg" || ext == "psd" || ext == "psb" || ext == "ai" || ext == "eps" || UiHelper::isGraphicsFile(ext)) {
                 img = CapsuleMediaExtractor::getCapsuleThumbnailReadOnly(path);
                 if (!img.isNull()) {
                     ar = (double)img.width() / img.height();
                     hasThumb = true;
                 }
-            } else if (UiHelper::isGraphicsFile(ext) && ext != "cur" && ext != "ico" && ext != "ani") {
-                img = CapsuleMediaExtractor::getCapsuleThumbnailReadOnly(path);
-                if (!img.isNull()) {
-                    ar = (double)img.width() / img.height();
-                    hasThumb = true;
-                }
-            } else if (ext == "cur" || ext == "ico" || ext == "ani") {
-                ar = 1.0;
-                hasThumb = false;
-            } else if ((ext == "arc" || path.endsWith(".arc", Qt::CaseInsensitive) || path.endsWith(".arc/", Qt::CaseInsensitive) || path.endsWith(".arc\\", Qt::CaseInsensitive)) && info.isDir()) {
-                // 物理规范化文件夹路径：去除末尾的斜杠，保证拼接正常
+            } else if ((ext == "arc" || path.endsWith(".arc", Qt::CaseInsensitive)) && info.isDir()) {
                 QString cleanPath = path;
                 if (cleanPath.endsWith("/") || cleanPath.endsWith("\\")) {
                     cleanPath = cleanPath.left(cleanPath.length() - 1);
@@ -341,8 +327,7 @@ void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
                 QDir arcDir(cleanPath);
                 QStringList thumbFiles = arcDir.entryList({"*_thumbnail.png"}, QDir::Files);
                 if (!thumbFiles.isEmpty()) {
-                    QString thumbPath = cleanPath + "/" + thumbFiles.first();
-                    img = QImage(thumbPath);
+                    img = QImage(cleanPath + "/" + thumbFiles.first());
                     if (!img.isNull()) {
                         ar = (double)img.width() / img.height();
                         hasThumb = true;
@@ -350,36 +335,33 @@ void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
                 }
             }
 
-            QMetaObject::invokeMethod(weakThis.data(), [weakThis, path, img, ar, hasThumb]() {
-                if (weakThis) {
-                    QIcon icon;
-                    if (!img.isNull()) {
-                        icon = QIcon(QPixmap::fromImage(img));
-                    } else {
-                        QString iconTarget = path;
-                        QFileInfo localInfo(path);
-                        if (localInfo.suffix().toLower() == "arc" && localInfo.isDir()) {
-                            // 物理规范化文件夹路径：去除末尾的斜杠，保证拼接正常
-                            QString cleanPath = path;
-                            if (cleanPath.endsWith("/") || cleanPath.endsWith("\\")) {
-                                cleanPath = cleanPath.left(cleanPath.length() - 1);
-                            }
-                            QDir arcDir(cleanPath);
-                            QFileInfoList files = arcDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
-                            for (const QFileInfo& fi : files) {
-                                QString fn = fi.fileName();
-                                if (fn.endsWith("_thumbnail.png", Qt::CaseInsensitive)) continue;
-                                if (fn.compare("metadata.json", Qt::CaseInsensitive) == 0) continue;
-                                iconTarget = QDir::toNativeSeparators(fi.absoluteFilePath());
-                                break;
-                            }
-                        }
-                        icon = ShellIconManager::getFileIcon(iconTarget, 128);
+            QIcon icon;
+            if (!img.isNull()) {
+                icon = QIcon(QPixmap::fromImage(img));
+            } else {
+                QString iconTarget = path;
+                if (ext == "arc" && info.isDir()) {
+                    QString cleanPath = path;
+                    if (cleanPath.endsWith("/") || cleanPath.endsWith("\\")) {
+                        cleanPath = cleanPath.left(cleanPath.length() - 1);
                     }
+                    QDir arcDir(cleanPath);
+                    QStringList files = arcDir.entryList(QDir::Files | QDir::NoDotAndDotDot);
+                    for (const QString& fn : files) {
+                        if (fn.endsWith("_thumbnail.png", Qt::CaseInsensitive)) continue;
+                        if (fn.compare("metadata.json", Qt::CaseInsensitive) == 0) continue;
+                        iconTarget = cleanPath + "/" + fn;
+                        break;
+                    }
+                }
+                icon = ShellIconManager::getFileIcon(iconTarget, 128);
+            }
 
+            QMetaObject::invokeMethod(weakThis.data(), [weakThis, path, icon, ar, hasThumb]() {
+                if (weakThis) {
                     weakThis->m_iconCache.insert(path, new QIcon(icon));
                     weakThis->m_aspectRatios[QDir::toNativeSeparators(path)] = hasThumb ? ar : -1.0;
-                    weakThis->m_requestedIcons.remove(path); // 🚨 任务完成，释放防抖锁！
+                    weakThis->m_requestedIcons.remove(path); // 🚨 保证解锁，释放请求锁
 
                     auto it = weakThis->m_pathToIndex.find(path);
                     if (it != weakThis->m_pathToIndex.end()) {
@@ -387,13 +369,13 @@ void LibraryAssetModel::loadThumbnailsForRows(const QList<int>& rows) {
                         if (weakThis->isSuspended()) {
                             weakThis->m_pendingUpdateRows.insert(rIdx);
                         } else {
-                            emit weakThis->dataChanged(weakThis->index(rIdx, 0), weakThis->index(rIdx, 0), {Qt::DecorationRole, AspectRatioRole, HasThumbnailRole});
+                            emit weakThis->dataChanged(weakThis->index(rIdx, 0), weakThis->index(rIdx, 0), {Qt::DecorationRole, HasThumbnailRole});
                         }
                     }
                 }
             });
-        }
-    });
+        });
+    }
 }
 
 QVariant LibraryAssetModel::data(const QModelIndex& index, int role) const {
@@ -521,8 +503,8 @@ QVariant LibraryAssetModel::data(const QModelIndex& index, int role) const {
         static const QStringList iconOnlyExts = {"cur", "ico", "ani"};
         if (iconOnlyExts.contains(record.suffix.toLower())) return false;
 
-        QFileInfo pInfo(path);
-        bool isInsideArcContainer = pInfo.dir().dirName().endsWith(".arc", Qt::CaseInsensitive);
+        // 纯内存字符串快速匹配，零 QFileInfo 构造与系统调用
+        bool isInsideArcContainer = path.contains(".arc/", Qt::CaseInsensitive) || path.contains(".arc\\", Qt::CaseInsensitive);
         bool isArcContainer = record.isDir && path.endsWith(".arc", Qt::CaseInsensitive);
         if (isInsideArcContainer || isArcContainer) {
             QString nativePath = QDir::toNativeSeparators(path);

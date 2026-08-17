@@ -583,7 +583,7 @@ ContentPanel::ContentPanel(QWidget* parent)
 
     m_visibleTimer = new QTimer(this);
     m_visibleTimer->setSingleShot(true);
-    m_visibleTimer->setInterval(100); 
+    m_visibleTimer->setInterval(60); 
     connect(m_visibleTimer, &QTimer::timeout, this, &ContentPanel::refreshVisibleThumbnails);
     
     auto onDataChanged = [this](const QModelIndex& topLeft, const QModelIndex& bottomRight, const QVector<int>& roles) {
@@ -850,8 +850,8 @@ void ContentPanel::refreshVisibleThumbnails() {
     if (topIdx.isValid()) top = topIdx.row();
     if (bottomIdx.isValid()) bottom = bottomIdx.row();
 
-    // 稍微向外扩大一两页缓冲，以防止滑动假白 (Precache padding)
-    int padding = 5;
+    // 稍微向外扩大缓冲页，防止滑动假白 (Precache padding)
+    int padding = 25;
     top = std::max(0, top - padding);
     bottom = std::min(m_proxyModel->rowCount() - 1, bottom + padding);
 
@@ -1413,7 +1413,10 @@ void ContentPanel::initGridView() {
     connect(m_gridView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &ContentPanel::onSelectionChanged); 
     connect(m_gridView, &QAbstractItemView::customContextMenuRequested, this, &ContentPanel::onCustomContextMenuRequested); 
     connect(m_gridView->verticalScrollBar(), &QScrollBar::valueChanged, this, [this]() {
-        m_visibleTimer->start();
+        m_visibleTimer->start(60);
+    });
+    connect(m_gridView->verticalScrollBar(), &QScrollBar::sliderReleased, this, [this]() {
+        refreshVisibleThumbnails();
     });
 } 
  

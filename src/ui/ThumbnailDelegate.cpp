@@ -145,16 +145,19 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         CardPainterHelper::drawStatusIndicators(painter, m.cardRect, isPinned, isManaged, isDir, progress);
     }
 
-    // ④ 绘制自适应扩展名徽章
+    // ④ 绘制自适应扩展名徽章（直接从内存模型取值，零 QFileInfo 磁盘 I/O）
     if (m_pathRole != -1) {
         QString type = (m_typeRole != -1) ? index.data(m_typeRole).toString() : "";
-        QString path = index.data(m_pathRole).toString();
-        QFileInfo info(path);
         QString ext;
         if (type == "category" || type == "folder") {
-            ext = "DIR"; // 分类与文件夹均强制显示为 "DIR" 徽章，增强视觉一致性
+            ext = "DIR";
         } else {
-            ext = info.isDir() ? "DIR" : info.suffix().toUpper();
+            QString path = index.data(m_pathRole).toString();
+            int dotIdx = path.lastIndexOf('.');
+            int slashIdx = std::max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+            if (dotIdx > slashIdx && dotIdx != -1) {
+                ext = path.mid(dotIdx + 1).toUpper();
+            }
         }
         if (ext.isEmpty()) ext = "FILE";
 
