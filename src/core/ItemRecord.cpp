@@ -61,10 +61,8 @@ ItemRecord ItemRecord::create(const QString& path, const RuntimeMeta* providedMe
 
         // 直接从内存元数据注入真实素材文件名与后缀
         if (!meta.baseName.empty()) {
-            QString bName = QString::fromStdWString(meta.baseName);
-            QString ext = QString::fromStdWString(meta.ext);
-            r.filename = ext.isEmpty() ? bName : (bName + "." + ext);
-            r.suffix = ext.toLower();
+            r.filename = QString::fromStdWString(meta.baseName);
+            r.suffix = QString::fromStdWString(meta.ext).toLower();
         } else {
             int lastSlash = std::max(nPath.lastIndexOf('\\'), nPath.lastIndexOf('/'));
             r.filename = (lastSlash != -1) ? nPath.mid(lastSlash + 1) : nPath;
