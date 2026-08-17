@@ -616,7 +616,7 @@ sqlite3* DatabaseManager::getDriveDb(const std::wstring& volumeSerial, const QSt
             // 2026-07-xx 按照用户要求：若数据库已加载但盘符发生变化，由解耦路由计算新路径
             if (!cleanLetter.isEmpty()) {
                 QString currentDiskPath = QString::fromStdWString(m_driveDbs[volumeSerial].diskPath);
-                QString resolvedPath = ShellHelper::resolveAndAlignDatabasePath(volumeSerial, cleanLetter, currentDiskPath, true);
+                QString resolvedPath = resolveVolumeDrift(volumeSerial, cleanLetter, currentDiskPath, true);
                 
                 if (currentDiskPath != resolvedPath) {
                     
@@ -640,7 +640,7 @@ sqlite3* DatabaseManager::getDriveDb(const std::wstring& volumeSerial, const QSt
     }
 
     // 2. 若未加载，在锁外执行较慢的物理对账和对齐，避免阻塞其他线程
-    QString resolvedPath = ShellHelper::resolveAndAlignDatabasePath(volumeSerial, cleanLetter, "", false);
+    QString resolvedPath = resolveVolumeDrift(volumeSerial, cleanLetter, "", false);
     DbConnection conn;
     if (loadDb(resolvedPath.toStdWString(), conn)) {
         std::lock_guard<std::mutex> lock(m_mutex);
@@ -745,6 +745,83 @@ void DatabaseManager::workerLoop() {
             task();
         }
     }
+}
+
+QString DatabaseManager::resolveVolumeDrift(const std::wstring& volumeSerial, const QString& driveLetter, const QString& currentDiskPathInConn, bool isLoaded) {
+    QString cleanLetter = "";
+    if (!driveLetter.isEmpty()) {
+        cleanLetter = driveLetter.at(0).toUpper();
+    }
+
+    QString appDir = getAppDir();
+    QString metaDir = appDir + "/.arcmeta";
+    QDir().mkpath(metaDir);
+    ShellHelper::ensureHidden(metaDir.toStdWString());
+
+    QString serialStr = QString::fromStdWString(volumeSerial).toUpper();
+    QString expectedFileName = QString("Arcmeta_%1%2.db").arg(serialStr).arg(cleanLetter.isEmpty() ? "" : "_" + cleanLetter);
+    QString targetPath = metaDir + "/" + expectedFileName;
+
+    if (isLoaded) {
+        if (!cleanLetter.isEmpty()) {
+            if (!currentDiskPathInConn.endsWith(expectedFileName)) {
+
+                // 如果目标已存在且不是自己，先将其移走（按用户规则重命名为无效）
+                if (QFile::exists(targetPath) && targetPath != currentDiskPathInConn) {
+                    QString invalidBase = QString("%1/Arcmeta_%2_无效").arg(metaDir).arg(serialStr);
+                    QString invalidPath = invalidBase + ".db";
+                    int counter = 1;
+                    while (QFile::exists(invalidPath)) {
+                        invalidPath = QString("%1_%2.db").arg(invalidBase).arg(counter++);
+                    }
+                    QFile::rename(targetPath, invalidPath);
+                }
+
+                if (QFile::rename(currentDiskPathInConn, targetPath)) {
+                    return targetPath;
+                }
+            }
+        }
+        return currentDiskPathInConn;
+    }
+
+    // 未加载时的路由/纠偏
+    if (!QFile::exists(targetPath)) {
+        QDir dir(metaDir);
+        QStringList filters;
+        filters << QString("Arcmeta_%1*.db").arg(serialStr);
+        QFileInfoList list = dir.entryInfoList(filters, QDir::Files | QDir::Hidden | QDir::System, QDir::Time);
+
+        if (!list.isEmpty()) {
+            // Case A: 有旧文件。选择最近修改的一个作为目标进行重命名。
+            QFileInfo bestInfo = list.first();
+            if (!cleanLetter.isEmpty()) {
+                if (!QFile::rename(bestInfo.absoluteFilePath(), targetPath)) {
+                    targetPath = bestInfo.absoluteFilePath();
+                }
+            } else {
+                targetPath = bestInfo.absoluteFilePath();
+            }
+
+            // 处理冲突的其他旧文件 (Plan-97 补充要求)
+            for (int i = 1; i < list.size(); ++i) {
+                QString conflictPath = list.at(i).absoluteFilePath();
+                QString invalidBase = QString("%1/Arcmeta_%2_无效").arg(metaDir).arg(serialStr);
+                QString invalidPath = invalidBase + ".db";
+                int counter = 1;
+                while (QFile::exists(invalidPath)) {
+                    invalidPath = QString("%1_%2.db").arg(invalidBase).arg(counter++);
+                }
+                if (QFile::rename(conflictPath, invalidPath)) {
+                    qWarning() << "[DatabaseManager] 冲突库已标注为无效:" << invalidPath;
+                } else {
+                    qWarning() << "[DatabaseManager] 冲突库标注失败，原始路径保留:" << conflictPath;
+                }
+            }
+        }
+    }
+
+    return targetPath;
 }
 
 sqlite3* DatabaseManager::getDbForPath(const std::wstring& path) { 

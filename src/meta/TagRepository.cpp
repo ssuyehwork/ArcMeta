@@ -6,16 +6,14 @@
 #include <QDir>
 #include <vector>
 #include <string>
+#include <mutex>
 
 namespace ArcMeta {
 
 QList<TagRepository::TagGroup> TagRepository::getAllGroups() {
     // 确保数据已自动检查与迁移
-    static bool migratedChecked = false;
-    if (!migratedChecked) {
-        migratedChecked = true;
-        checkAndMigrate();
-    }
+    static std::once_flag s_migrateOnce;
+    std::call_once(s_migrateOnce, []() { checkAndMigrate(); });
 
     QList<TagGroup> results;
     sqlite3* db = DatabaseManager::instance().getGlobalDb();
@@ -271,13 +269,17 @@ void TagRepository::checkAndMigrate() {
                         sqlite3_bind_text16(groupInsertStmt, 2, mg.name.c_str(), -1, SQLITE_TRANSIENT);
                         sqlite3_bind_text16(groupInsertStmt, 3, mg.color.c_str(), -1, SQLITE_TRANSIENT);
                         sqlite3_bind_int(groupInsertStmt, 4, mg.sortOrder);
-                        sqlite3_step(groupInsertStmt);
+                        if (sqlite3_step(groupInsertStmt) != SQLITE_DONE) {
+                            qWarning() << "[TagRepository] 迁移 tag_group 插入失败:" << sqlite3_errmsg(globalDb);
+                        }
                         sqlite3_reset(groupInsertStmt);
 
                         for (const auto& tag : mg.tags) {
                             sqlite3_bind_int(itemInsertStmt, 1, mg.id);
                             sqlite3_bind_text16(itemInsertStmt, 2, tag.c_str(), -1, SQLITE_TRANSIENT);
-                            sqlite3_step(itemInsertStmt);
+                            if (sqlite3_step(itemInsertStmt) != SQLITE_DONE) {
+                                qWarning() << "[TagRepository] 迁移 tag_group_item 插入失败:" << sqlite3_errmsg(globalDb);
+                            }
                             sqlite3_reset(itemInsertStmt);
                         }
                     }

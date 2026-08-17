@@ -187,6 +187,9 @@ private:
     bool saveDb(DbConnection& conn, bool forceFull = false);
     void closeDb(DbConnection& conn);
 
+    QString resolveVolumeDrift(const std::wstring& volumeSerial, const QString& driveLetter,
+                               const QString& currentDiskPathInConn = "", bool isLoaded = false);
+
     QString getAppDir();
 };
 
