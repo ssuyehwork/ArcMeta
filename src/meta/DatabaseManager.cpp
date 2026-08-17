@@ -8,8 +8,17 @@
 #include <QDebug>
 #include <windows.h>
 #include "MetadataManager.h"
-#include "../util/ShellHelper.h"
 #include "../util/AppDirectoryInitializer.h"
+
+namespace {
+#ifdef Q_OS_WIN
+    inline void ensureHidden(const std::wstring& path) {
+        SetFileAttributesW(path.c_str(), FILE_ATTRIBUTE_HIDDEN);
+    }
+#else
+    inline void ensureHidden(const std::wstring&) {}
+#endif
+} // anonymous namespace
 
 namespace ArcMeta {
 
@@ -756,7 +765,7 @@ QString DatabaseManager::resolveVolumeDrift(const std::wstring& volumeSerial, co
     QString appDir = getAppDir();
     QString metaDir = appDir + "/.arcmeta";
     QDir().mkpath(metaDir);
-    ShellHelper::ensureHidden(metaDir.toStdWString());
+    ensureHidden(metaDir.toStdWString());
 
     QString serialStr = QString::fromStdWString(volumeSerial).toUpper();
     QString expectedFileName = QString("Arcmeta_%1%2.db").arg(serialStr).arg(cleanLetter.isEmpty() ? "" : "_" + cleanLetter);

@@ -1,8 +1,8 @@
 #include "BatchRenameEngine.h"
 #include "MetadataManager.h"
-#include "../ui/MemoryBatchRenameService.h"
 #include <QFileInfo>
 #include <QDateTime>
+#include <filesystem>
 
 namespace ArcMeta {
 
@@ -51,8 +51,22 @@ QString BatchRenameEngine::processOne(const std::wstring& path, int index, const
 }
 
 bool BatchRenameEngine::execute(const std::vector<std::wstring>& originalPaths, const std::vector<RenameRule>& rules) {
-    auto newNameWstrings = preview(originalPaths, rules);
-    MemoryBatchRenameService::execute(originalPaths, newNameWstrings, nullptr);
+    auto newNames = preview(originalPaths, rules);
+    std::vector<std::pair<std::wstring, std::wstring>> rawPairs;
+    for (int i = 0; i < (int)originalPaths.size(); ++i) {
+        std::filesystem::path oldP(originalPaths[i]);
+        std::filesystem::path newP = oldP.parent_path() / newNames[i];
+        try {
+            std::filesystem::rename(oldP, newP);
+            rawPairs.push_back({oldP.wstring(), newP.wstring()});
+        } catch (...) {
+            // 单文件失败不中断整批，继续处理
+        }
+    }
+    // 批量更新数据库路径索引（异步，不阻塞）
+    if (!rawPairs.empty()) {
+        MetadataManager::instance().renameBatchAsync(rawPairs, nullptr);
+    }
     return true;
 }
 
