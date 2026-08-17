@@ -1518,9 +1518,8 @@ void MainWindow::setupSplitters() {
         if (m_categoryPanel) m_categoryPanel->selectCategory(-1); // 选中“全部数据”
         if (m_searchEdit) m_searchEdit->setText(tag);
         
-        // 标签跳转默认作为全局搜索处理 (不限范围)
-        QStringList paths = MetadataManager::instance().searchInCache(tag);
-        m_contentPanel->loadPaths(paths);
+        // 【修复】走统一异步搜索管线，避免主线程 SQLite 查询卡顿
+        CoreController::instance().performSearch(tag, "global", 0, "");
     });
 
     m_bodyLayout->addWidget(m_mainSplitter);

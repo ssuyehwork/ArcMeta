@@ -631,13 +631,17 @@ std::string MetadataManager::migrateCapsuleToLibrary(const std::string& assetId,
  
     // 1. 物理复制整套胶囊包内部的文件
     if (!QDir().mkpath(targetContainerDir)) {
+        qWarning() << "[CapsuleMigration] Failed to create dir:" << targetContainerDir;
         return "";
     }
     QDir srcDir(containerDir.absolutePath());
     QStringList files = srcDir.entryList(QDir::Files | QDir::NoDotAndDotDot);
     for (const QString& file : files) {
         if (!QFile::copy(srcDir.absoluteFilePath(file), targetContainerDir + "/" + file)) {
-            QDir(targetContainerDir).removeRecursively();
+            qWarning() << "[CapsuleMigration] Failed to copy:" << file << "to" << targetContainerDir;
+            if (!QDir(targetContainerDir).removeRecursively()) {
+                qCritical() << "[CapsuleMigration] Rollback failed! Corrupted folder leftover:" << targetContainerDir;
+            }
             return "";
         }
     }
@@ -772,7 +776,7 @@ void MetadataManager::markAsRegistered(const std::wstring& path) {
  
         if (pathsToRegister.empty()) return; 
  
-        QStringList qPathsToRegister; 
+        std::vector<std::wstring> actualEnqueues; 
         SqlTransaction trans(db); 
         for (const auto& p : pathsToRegister) { 
             ensureActivated(p); 
@@ -783,11 +787,11 @@ void MetadataManager::markAsRegistered(const std::wstring& path) {
                 continue;
             }
             updateIngestionStatus(p, 0); 
-            qPathsToRegister << QString::fromStdWString(p); 
+            actualEnqueues.push_back(p); 
         } 
          
-        if (trans.commit() && !qPathsToRegister.isEmpty()) { 
-            registerItemsAsync(qPathsToRegister, true); 
+        if (trans.commit() && !actualEnqueues.empty()) { 
+            MediaExtractorPipeline::instance().enqueueBatch(actualEnqueues); 
         } 
     }); 
 } 
@@ -1116,9 +1120,11 @@ void MetadataManager::setSha256(const std::wstring& path, const std::string& sha
         m_shards[idx].items[nPath].sha256 = sha256;
     }
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-    DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
-        persistAsync(nPath);
-    });
+    if (isInsideManagedLibrary(nPath)) {
+        DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
+            persistAsync(nPath);
+        });
+    }
 }
 
 void MetadataManager::updateExtractedMediaFeaturesBatch(const std::vector<ExtractedFeatureItem>& items) {
@@ -1258,9 +1264,11 @@ void MetadataManager::setAddedAt(const std::wstring& path, long long addedAt, bo
         m_shards[idx].items[nPath].added_at = addedAt;
     }
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-    DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
-        persistAsync(nPath);
-    });
+    if (isInsideManagedLibrary(nPath)) {
+        DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
+            persistAsync(nPath);
+        });
+    }
 }
 
 void MetadataManager::addCategoryToItemMemory(const std::wstring& path, int categoryId) {
@@ -1474,9 +1482,11 @@ void MetadataManager::setEncrypted(const std::wstring& path, bool encrypted, boo
         m_shards[idx].items[nPath].encrypted = encrypted;
     }
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-    DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
-        persistAsync(nPath);
-    });
+    if (isInsideManagedLibrary(nPath)) {
+        DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
+            persistAsync(nPath);
+        });
+    }
 }
 
 void MetadataManager::setManaged(const std::wstring& path, bool managed, bool notify) {
@@ -1508,9 +1518,11 @@ void MetadataManager::setPalettes(const std::wstring& path, const QVector<QPair<
         m_shards[idx].items[nPath].palettes = entries;
     }
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-    DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
-        persistAsync(nPath);
-    });
+    if (isInsideManagedLibrary(nPath)) {
+        DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
+            persistAsync(nPath);
+        });
+    }
 }
 
 void MetadataManager::setItemVisualMetadata(const std::wstring& path, const std::wstring& color, const QVector<QPair<QColor, float>>& palettes, bool notify) {
@@ -1535,9 +1547,11 @@ void MetadataManager::setItemVisualMetadata(const std::wstring& path, const std:
     }
     
     if (notify) notifyUI(RefreshLevel::PathUpdate, QString::fromStdWString(nPath));
-    DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
-        persistAsync(nPath);
-    });
+    if (isInsideManagedLibrary(nPath)) {
+        DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
+            persistAsync(nPath);
+        });
+    }
 }
 
 void MetadataManager::setItemDimensions(const std::wstring& path, int width, int height) {
@@ -1550,9 +1564,11 @@ void MetadataManager::setItemDimensions(const std::wstring& path, int width, int
         meta.width = width;
         meta.height = height;
     }
-    DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
-        persistAsync(nPath, false);
-    });
+    if (isInsideManagedLibrary(nPath)) {
+        DatabaseManager::instance().enqueueSyncTask([this, nPath]() {
+            persistAsync(nPath, false);
+        });
+    }
 }
 
 QVector<QColor> MetadataManager::getPalettes(const std::wstring& path) {
@@ -1605,6 +1621,7 @@ void MetadataManager::renameBatchAsync(
         }
 
         // B. 内存分片节点批量替换
+        std::vector<std::pair<std::wstring, std::wstring>> ioTasks;
         {
             std::unique_lock<std::shared_mutex> lock(m_mutex);
             for (const auto& pair : normalizedPairs) {
@@ -1622,14 +1639,6 @@ void MetadataManager::renameBatchAsync(
                         m_shards[oldIdx].items.erase(it);
                         found = true;
                     }
-                }
-
-                QFileInfo oldFileInfo(QString::fromStdWString(curOld));
-                QFileInfo newFileInfo(QString::fromStdWString(curNew));
-                if (oldFileInfo.isDir()) {
-                    AmMetaJson::migrateFolderCache(oldFileInfo.absoluteFilePath(), newFileInfo.absoluteFilePath());
-                } else {
-                    AmMetaJson::renameItem(oldFileInfo.absolutePath(), oldFileInfo.fileName(), newFileInfo.fileName());
                 }
 
                 if (!found) continue;
@@ -1679,7 +1688,19 @@ void MetadataManager::renameBatchAsync(
                     }
                 }
 
+                ioTasks.push_back(pair);
                 successCount++;
+            }
+        }
+
+        // B2. 在锁外执行磁盘元数据文件的重命名与迁移
+        for (const auto& pair : ioTasks) {
+            QFileInfo oldFileInfo(QString::fromStdWString(pair.first));
+            QFileInfo newFileInfo(QString::fromStdWString(pair.second));
+            if (oldFileInfo.isDir()) {
+                AmMetaJson::migrateFolderCache(oldFileInfo.absoluteFilePath(), newFileInfo.absoluteFilePath());
+            } else {
+                AmMetaJson::renameItem(oldFileInfo.absolutePath(), oldFileInfo.fileName(), newFileInfo.fileName());
             }
         }
 
@@ -1749,6 +1770,7 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
     // 2026-08-xx 按照性能优化要求：将级联更名逻辑移至后台线程，杜绝大目录重命名阻塞主线程 (Plan-128)
     (void)QtConcurrent::run([this, nOld, nNew]() {
         std::vector<std::pair<std::wstring, std::wstring>> itemsToRename;
+        std::vector<std::pair<std::wstring, std::wstring>> ioTasks;
         
         {
             std::unique_lock<std::shared_mutex> lock(m_mutex);
@@ -1787,14 +1809,6 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
                         m_shards[oldIdx].items.erase(it);
                         found = true;
                     }
-                }
-
-                QFileInfo oldFileInfo(QString::fromStdWString(curOld));
-                QFileInfo newFileInfo(QString::fromStdWString(curNew));
-                if (oldFileInfo.isDir()) {
-                    AmMetaJson::migrateFolderCache(oldFileInfo.absoluteFilePath(), newFileInfo.absoluteFilePath());
-                } else {
-                    AmMetaJson::renameItem(oldFileInfo.absolutePath(), oldFileInfo.fileName(), newFileInfo.fileName());
                 }
 
                 if (!found) continue;
@@ -1866,6 +1880,19 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
                     m_folderProgressCache.erase(curOld);
                     m_folderProgressCache[curNew] = prog;
                 }
+
+                ioTasks.push_back(pair);
+            }
+        }
+
+        // 在全局锁外安全执行磁盘 JSON 重命名与迁移
+        for (const auto& pair : ioTasks) {
+            QFileInfo oldFileInfo(QString::fromStdWString(pair.first));
+            QFileInfo newFileInfo(QString::fromStdWString(pair.second));
+            if (oldFileInfo.isDir()) {
+                AmMetaJson::migrateFolderCache(oldFileInfo.absoluteFilePath(), newFileInfo.absoluteFilePath());
+            } else {
+                AmMetaJson::renameItem(oldFileInfo.absolutePath(), oldFileInfo.fileName(), newFileInfo.fileName());
             }
         }
 
