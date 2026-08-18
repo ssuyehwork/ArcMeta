@@ -61,8 +61,14 @@ ItemRecord ItemRecord::create(const QString& path, const RuntimeMeta* providedMe
 
         // 直接从内存元数据注入真实素材文件名与后缀
         if (!meta.baseName.empty()) {
-            r.filename = QString::fromStdWString(meta.baseName);
+            QString baseNameStr = QString::fromStdWString(meta.baseName);
             r.suffix = QString::fromStdWString(meta.ext).toLower();
+            // 严禁对已包含扩展名的文件名进行二次拼接（消除 .svg.svg 双后缀 Bug）
+            if (!r.suffix.isEmpty() && !baseNameStr.endsWith("." + r.suffix, Qt::CaseInsensitive)) {
+                r.filename = baseNameStr + "." + r.suffix;
+            } else {
+                r.filename = baseNameStr;
+            }
         } else {
             int lastSlash = std::max(nPath.lastIndexOf('\\'), nPath.lastIndexOf('/'));
             r.filename = (lastSlash != -1) ? nPath.mid(lastSlash + 1) : nPath;

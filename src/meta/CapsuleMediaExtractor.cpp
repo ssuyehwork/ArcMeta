@@ -16,15 +16,20 @@ std::mutex CapsuleMediaExtractor::s_qtGuiMutex;
 QString CapsuleMediaExtractor::getDiskThumbCachePath(const QString& mainAssetPath) {
     if (mainAssetPath.isEmpty()) return "";
     
-    // 1. 规范化路径并计算 16 位 Sha256 哈希指纹
+    QFileInfo fi(mainAssetPath);
+    // 1. 提取源文件所在的父文件夹路径并规范化小写，计算父文件夹 SHA-256 哈希作为专属存储桶目录
+    QString parentFolder = QDir::toNativeSeparators(fi.absolutePath()).toLower();
+    QByteArray folderHash = QCryptographicHash::hash(parentFolder.toUtf8(), QCryptographicHash::Sha256).toHex().toUpper();
+
+    // 2. 规范化主资产路径并计算单个缩略图文件的 SHA-256 哈希指纹
     QString normPath = QDir::toNativeSeparators(mainAssetPath).toLower();
-    QByteArray hash = QCryptographicHash::hash(normPath.toUtf8(), QCryptographicHash::Sha256).left(8).toHex().toUpper();
+    QByteArray fileHash = QCryptographicHash::hash(normPath.toUtf8(), QCryptographicHash::Sha256).left(8).toHex().toUpper();
     
-    // 2. 确保 .arcmeta/disk_thumbs/ 目录存在
-    QString cacheDir = QCoreApplication::applicationDirPath() + "/.arcmeta/disk_thumbs";
+    // 3. 确保 .arcmeta/disk_thumbs/<FolderHash>/ 目录存在
+    QString cacheDir = QCoreApplication::applicationDirPath() + "/.arcmeta/disk_thumbs/" + QString(folderHash);
     QDir().mkpath(cacheDir);
 
-    return cacheDir + "/" + QString(hash) + ".png";
+    return cacheDir + "/" + QString(fileHash) + ".png";
 }
 
 QImage CapsuleMediaExtractor::getCapsuleThumbnailReadOnly(const QString& mainAssetPath) {
