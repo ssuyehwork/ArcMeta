@@ -764,8 +764,6 @@ void MainWindow::initUi() {
             m_contentPanel->migrateModelCache(oldPath, newPath);
             // 重命名成功，同步刷新当前目录
             m_contentPanel->refreshAll();
-            // 同时刷新侧边栏统计计数
-            if (m_categoryPanel) m_categoryPanel->requestRefresh(true);
         } else {
             // 重命名失败，利用 Model 的 updateRecordMetadata 将原先状态重新拉回面板
             m_contentPanel->updateItemMetadata(oldPath);
