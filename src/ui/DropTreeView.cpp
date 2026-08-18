@@ -62,7 +62,7 @@ void DropTreeView::startDrag(Qt::DropActions supportedActions) {
     QModelIndexList indexes = selectedIndexes();
     if (indexes.isEmpty()) return;
 
-    // 核心增强：拦截并注入物理路径 QUrl，确保 CategoryPanel 接收校验通过
+    // 核心增强：拦截并注入物理路径 QUrl
     QMimeData* mimeData = model()->mimeData(indexes);
     if (!mimeData) {
         mimeData = new QMimeData();
