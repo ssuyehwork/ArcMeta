@@ -30,7 +30,6 @@
 #include "meta/MediaExtractorPipeline.h"
 #include "meta/DatabaseManager.h"
 #include "core/CoreController.h"
-#include "core/AutoImportManager.h"
 
 /**
  * @brief 自定义日志重定向。极速格式化日志内容后投递到异步缓冲区，杜绝同步磁盘等待。
@@ -78,14 +77,14 @@ int main(int argc, char *argv[]) {
     // -------------------------------------------------------------
     HANDLE hMutex = nullptr;
 #ifdef Q_OS_WIN
-    hMutex = CreateMutexA(NULL, TRUE, "ArcMeta_SingleInstance_Mutex");
+    hMutex = CreateMutexA(NULL, TRUE, "QuarkMeta_SingleInstance_Mutex");
     if (hMutex == NULL || GetLastError() == ERROR_ALREADY_EXISTS) {
         if (hMutex) CloseHandle(hMutex);
         // 单实例检测失败，由于尚未影响任何运行状态及日志，直接优雅退出
         return 0;
     }
 #else
-    QString lockPath = QDir::tempPath() + "/ArcMeta_SingleInstance.lock";
+    QString lockPath = QDir::tempPath() + "/QuarkMeta_SingleInstance.lock";
     static QLockFile lockFile(lockPath);
     if (!lockFile.tryLock(100)) {
         return 0;
@@ -115,8 +114,8 @@ int main(int argc, char *argv[]) {
     // 杜绝相对路径幻觉，强制使用 Qt 资源系统 (:/) 加载 app_icon.ico，确保托盘显示不失效
     a.setWindowIcon(QIcon(":/app_icon.ico"));
 
-    a.setApplicationName("ArcMeta");
-    a.setOrganizationName("ArcMetaTeam");
+    a.setApplicationName("QuarkMeta");
+    a.setOrganizationName("QuarkMeta");
 
     // -------------------------------------------------------------
     // 重构 4：COM 亲和性。在 QApplication 实例化后，安全初始化 COM 环境
@@ -137,7 +136,6 @@ int main(int argc, char *argv[]) {
     
     // 启动异步系统扫描与监控监听
     ArcMeta::CoreController::instance().startSystem();
-    ArcMeta::AutoImportManager::instance().startListening();
 
     // 利用主线程第一个 Tick 调度，平滑显示窗口，消解首帧信号洪暴导致的渲染卡顿
     QTimer::singleShot(0, [&w]() {

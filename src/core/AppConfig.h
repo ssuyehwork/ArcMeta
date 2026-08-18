@@ -38,7 +38,7 @@ public:
     }
 
 private:
-    AppConfig() : m_settings("ArcMeta团队", "ArcMeta") {}
+    AppConfig() : m_settings("QuarkMeta", "QuarkMeta") {}
     ~AppConfig() = default;
     AppConfig(const AppConfig&) = delete;
     AppConfig& operator=(const AppConfig&) = delete;

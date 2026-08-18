@@ -162,7 +162,7 @@ public:
 
     /**
      * @brief 一站式项目注册流程（受控模式）
-     * 2026-07-xx 按照 Plan-116：仅允许受信任的来源（如 AutoImportManager）调用
+     * 2026-07-xx 仅允许受信任的来源调用
      * @param path 物理路径
      * @param authorized 是否经过授权（只有 true 才能创建新记录）
      */

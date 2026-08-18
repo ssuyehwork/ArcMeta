@@ -1,5 +1,4 @@
 #include "CoreController.h"
-#include "AutoImportManager.h"
 #include "NativeFolderWatcher.h"
 #include "AppConfig.h"
 #include "../meta/CategoryRepo.h"
@@ -192,9 +191,6 @@ void CoreController::startSystem() {
                 }
             }
 
-            // 2026-08-xx 物理同步：初始化完成后执行一次全量物理库对账 (在后台线程执行，避免阻塞 UI)
-            AutoImportManager::instance().syncAllManagedLibraries(wasCleanShutdown);
-
             QMetaObject::invokeMethod(this, [this]() {
                 setStatus("系统就绪", false);
                 emit initializationFinished();
@@ -269,10 +265,6 @@ void CoreController::handleDeviceChange(unsigned long wParam, unsigned long long
     // 2026-05-24 按照用户要求：捕捉硬件变更，硬盘插入时触发 GLOB 扫描对账
     // [Plan-131 方案 E] 从 MainWindow 迁移至此
     if (wParam == 0x8000 /* DBT_DEVICEARRIVAL */ || wParam == 0x8004 /* DBT_DEVICEREMOVECOMPLETE */) {
-        // 异步触发扫描，防止阻塞 UI
-        (void)QtConcurrent::run([]() {
-            // 或者 AutoImportManager::instance().syncAllManagedLibraries();
-        });
     }
 #endif
     Q_UNUSED(lParam);

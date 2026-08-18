@@ -15,7 +15,7 @@ public:
     static DiskIngestionService& instance();
 
     /**
-     * @brief 对指定根物理目录开展 1:1 的全量异步深度扫描 (从 AutoImportManager 物理移入)
+     * @brief 对指定根物理目录开展 1:1 的全量异步深度扫描
      */
     void handleRecursiveIngestion(const std::wstring& rootPath);
 

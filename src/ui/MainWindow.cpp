@@ -70,7 +70,6 @@ using namespace ArcMeta::Style;
 #include <QFileInfo>
 #include <QDir>
 #include "../meta/MetadataManager.h"
-#include "../core/AutoImportManager.h"
 #include "../core/NativeFolderWatcher.h"
 #include "FramelessDialog.h"
 #include "FramelessFileDialog.h"
@@ -205,7 +204,7 @@ MainWindow::MainWindow(QWidget* parent)
 
     resize(1200, 800);
     setMinimumSize(1180, 653); // 物理对齐：5x230px面板 + 20px分割手柄 + 10px全局边距
-    setWindowTitle("ArcMeta");
+    setWindowTitle("QuarkMeta");
 
     // ============================================================
     // 【物理护栏 - 禁止移动】事件过滤器必须在 initUi() 之前创建

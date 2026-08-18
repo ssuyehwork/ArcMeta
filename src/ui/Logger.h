@@ -128,8 +128,8 @@ public:
 
         // 如果日志异步写线程已被显式关闭，进入降级逻辑：直接同步追加至本地文件，保障退出时日志记录完整不崩溃
         if (s_writerStopped.load(std::memory_order_relaxed)) {
-            rotateLogFiles("arcmeta_debug.log");
-            QFile file("arcmeta_debug.log");
+            rotateLogFiles("quarkmeta_debug.log");
+            QFile file("quarkmeta_debug.log");
             if (file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
                 QTextStream out(&file);
                 QString timeStr = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss.zzz");
@@ -142,7 +142,7 @@ public:
         }
 
         if (!s_writer) {
-            s_writer = new LoggerWriterThread("arcmeta_debug.log");
+            s_writer = new LoggerWriterThread("quarkmeta_debug.log");
             s_writer->start(QThread::LowPriority);
         }
 

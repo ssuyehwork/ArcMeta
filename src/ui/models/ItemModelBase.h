@@ -20,7 +20,7 @@ public:
     explicit ItemModelBase(QObject* parent = nullptr) : QAbstractTableModel(parent) {}
     virtual ~ItemModelBase() override = default;
 
-    // 暴露通用接口合约，由 DiskItemModel 和 LibraryAssetModel 多态实现
+    // 暴露通用接口合约，由 DiskItemModel 实现
     virtual const std::vector<ArcMeta::ItemRecord>& allRecords() const = 0;
     virtual void setRecords(const std::vector<ArcMeta::ItemRecord>& records) = 0;
     virtual void clear() = 0;

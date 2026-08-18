@@ -25,7 +25,6 @@
 #include "ScanStats.h"
 #include "FilterPanel.h"
 #include "models/DiskItemModel.h"
-#include "models/LibraryAssetModel.h"
 
 #include "../core/ModelContract.h"
 
@@ -59,7 +58,7 @@ private:
 /**
  * @brief 虚拟化数据库模型：支持百万级条目瞬时加载 (2026-06-xx 重构)
  */
-// 🚨 极致物理重构：ArcMetaVirtualDbModel 已彻底退役并被 DiskItemModel / LibraryAssetModel 继承平替，在此安全移除
+// 🚨 极致物理重构：ArcMetaVirtualDbModel 已彻底退役，在此安全移除
 
 
 /**
@@ -246,8 +245,7 @@ private:
     // 视图组件
     QAbstractItemView* m_gridView = nullptr;
     QTreeView* m_treeView = nullptr;
-    DiskItemModel* m_diskModel = nullptr;       // 负责纯物理磁盘导航模型 (0)
-    LibraryAssetModel* m_libraryModel = nullptr; // 负责内存托管逻辑资产模型 (1)
+    DiskItemModel* m_diskModel = nullptr;       // 负责纯物理磁盘导航模型
     ItemModelBase* m_model = nullptr;           // 当前多态激活指针合约
 
     QTimer* m_visibleTimer = nullptr;

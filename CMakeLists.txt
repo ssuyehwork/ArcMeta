@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(ArcMeta)
+project(QuarkMeta)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -31,10 +31,10 @@ if(CMAKE_BINARY_DIR MATCHES "/out/")
     message(WARNING "⚠️ 检测到非法构建路径 [out]！请在 VS 工具栏切换至 [x64-release] 预设以符合《源码纯净》规范。")
 endif()
 
-# 2026-03-xx 按照用户要求：将可执行文件直接输出到指定项目子目录 ArcMeta 下，解决 \out 文件夹查找不便的问题
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/ArcMeta")
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/ArcMeta")
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/ArcMeta")
+# 2026-03-xx 将 QuarkMeta 可执行文件直接输出到项目子目录 QuarkMeta 下
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/QuarkMeta")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/QuarkMeta")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/QuarkMeta")
 
 # 自动生成 MOC/UIC/RCC
 set(CMAKE_AUTOMOC ON)
@@ -65,16 +65,12 @@ set(SOURCES
     src/core/IndexedEntry.h
     src/core/ItemRecord.cpp
     src/core/ItemRecord.h
-    src/core/DatabaseSynchronizer.cpp
-    src/core/DatabaseSynchronizer.h
     src/core/DiskScanService.cpp
     src/core/DiskScanService.h
     src/core/FileFilterService.cpp
     src/core/FileFilterService.h
     src/core/CategoryLoadService.cpp
     src/core/CategoryLoadService.h
-    src/core/LibraryMaintenanceService.cpp
-    src/core/LibraryMaintenanceService.h
     src/core/VolumeOnlineManager.cpp
     src/core/VolumeOnlineManager.h
     src/core/DiskTrashService.cpp
@@ -85,8 +81,6 @@ set(SOURCES
     src/core/OperationSnapshotEngine.cpp
     src/core/CategoryDropProcessor.h
     src/core/CategoryDropProcessor.cpp
-    src/core/AutoImportManager.cpp
-    src/core/AutoImportManager.h
     src/core/AppConfig.h
     src/core/NavigationHistoryService.cpp
     src/core/NavigationHistoryService.h
@@ -122,8 +116,6 @@ set(SOURCES
     src/ui/BatchRenamePreviewDialog.h
     src/ui/DuplicateConflictDialog.h
     src/ui/DuplicateConflictDialog.cpp
-    src/ui/MemoryBatchRenameService.cpp
-    src/ui/MemoryBatchRenameService.h
     src/ui/PresetManager.cpp
     src/ui/PresetManager.h
     src/ui/DiskBatchRenameService.cpp
@@ -236,8 +228,6 @@ set(SOURCES
     src/ui/models/ItemModelBase.h
     src/ui/models/DiskItemModel.h
     src/ui/models/DiskItemModel.cpp
-    src/ui/models/LibraryAssetModel.h
-    src/ui/models/LibraryAssetModel.cpp
     src/ui/UiHelper.h
     src/ui/IconCacheManager.h
     src/ui/IconCacheManager.cpp
@@ -264,7 +254,7 @@ set(SOURCES
     src/util/ImportHelper.h
     src/util/AssetImporter.cpp
     src/util/AssetImporter.h
-    ArcMeta.rc
+    QuarkMeta.rc
     resources/resources.qrc
 )
 
@@ -311,13 +301,13 @@ set(LIBTIFF_SOURCES
 list(APPEND SOURCES ${LIBTIFF_SOURCES})
 
 # 可执行文件 (添加 WIN32 属性以消除控制台黑框)
-# 修复：移除直接引用的 "ArcMeta.manifest"，改由 ArcMeta.rc 引入以杜绝 mt.exe 冲突
-add_executable(ArcMeta WIN32 ${SOURCES})
+# 修复：改由 QuarkMeta.rc 引入以杜绝 mt.exe 冲突
+add_executable(QuarkMeta WIN32 ${SOURCES})
 
 # 链接库 (文档红线列表: ole32, bcrypt)
 # 2026-04-14 按照用户要求：恢复 MFT 逻辑，重新引入 ntdll 依赖
 # 2026-05-10 修复：添加缺失的Qt6::Core和Qt6::Gui库
-target_link_libraries(ArcMeta PRIVATE
+target_link_libraries(QuarkMeta PRIVATE
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
@@ -329,7 +319,7 @@ target_link_libraries(ArcMeta PRIVATE
     psapi
 )
 
-target_include_directories(ArcMeta PRIVATE
+target_include_directories(QuarkMeta PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/meta
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/models
@@ -341,6 +331,6 @@ target_include_directories(ArcMeta PRIVATE
 # 2026-07-20 按照用户最新要求：
 # 彻底去除强制管理员权限，改为普通权限 (asInvoker)
 if(MSVC)
-    target_link_options(ArcMeta PRIVATE "/MANIFESTUAC:level='asInvoker' uiAccess='false'")
+    target_link_options(QuarkMeta PRIVATE "/MANIFESTUAC:level='asInvoker' uiAccess='false'")
 endif()
 # Force Refresh CMake: 2026-06-xx 11:30 (Removed AmMetaJson & SyncQueue, switched to DB-only)

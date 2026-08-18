@@ -2,7 +2,6 @@
 #include "BatchRenamePreviewDialog.h"
 #include "RuleRow.h"
 #include "UiHelper.h"
-#include "MemoryBatchRenameService.h"
 #include "DiskBatchRenameService.h"
 #include "PresetManager.h"
 #include "UndoToastOverlay.h"
@@ -408,12 +407,7 @@ void BatchRenameDialog::onExecute() {
         safeThis->accept();
     };
 
-    if (m_isMirrorSource) {
-        // 调度【内存模式独立模块】
-        MemoryBatchRenameService::execute(m_originalPaths, newNames, onCompletedCallback);
-    } else {
-        DiskBatchRenameService::execute(m_originalPaths, newNames, mode, targetDir, onCompletedCallback);
-    }
+    DiskBatchRenameService::execute(m_originalPaths, newNames, mode, targetDir, onCompletedCallback);
 }
 
 } // namespace ArcMeta

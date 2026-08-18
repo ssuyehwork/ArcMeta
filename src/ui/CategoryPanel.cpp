@@ -6,7 +6,6 @@
 #include "../meta/StatisticsService.h"
 #include "ContentPanel.h"
 #include "../core/DiskTrashService.h"
-#include "../core/LibraryMaintenanceService.h"
 #include "ColorPicker.h"
 #include "CategoryFilterProxyModel.h"
 #include "CategoryLockDialog.h"
@@ -974,32 +973,7 @@ void CategoryPanel::onEmptyTrash() {
 }
 
 void CategoryPanel::onScanAndCleanEmptyArcs() {
-    // 🚀 【重构解耦】：UI 仅处理界面的 loading 与交互，不执行任何 I/O 与数据库事务
-    m_btnScan->setEnabled(false);
-    m_btnScan->setIcon(UiHelper::getIcon("scan", QColor("#888888"), 16));
-
-    connect(&LibraryMaintenanceService::instance(), &LibraryMaintenanceService::cleanFinished,
-            this, [this](int cleanCount, int ghostCount, int orphanCount) {
-        m_btnScan->setEnabled(true);
-        m_btnScan->setIcon(UiHelper::getIcon("scan", QColor("#B0B0B0"), 16));
-
-        int totalCleaned = cleanCount + ghostCount;
-        if (totalCleaned > 0 || orphanCount > 0) {
-            requestRefresh(true);
-            QWidget* mw = window();
-            if (mw) QMetaObject::invokeMethod(mw, "refreshAll", Qt::QueuedConnection);
-
-            QString msg = QString("<b style='color:#00A650;'>已成功清理 %1 个空白/幽灵资产</b>").arg(totalCleaned);
-            if (orphanCount > 0) {
-                msg += QString("<br/><span style='color:#00A650; font-size:11px;'>同步剔除 %1 条孤立分类关系</span>").arg(orphanCount);
-            }
-            ToolTipOverlay::instance()->showText(QCursor::pos(), msg, 3500, QColor("#00A650"));
-        } else {
-            ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#CCCCCC;'>未检测到多余的空白托管包与幽灵数据</b>", 2000, QColor("#2D2D2D"));
-        }
-    }, Qt::UniqueConnection);
-
-    LibraryMaintenanceService::instance().scanAndCleanEmptyArcsAsync();
+    ToolTipOverlay::instance()->showText(QCursor::pos(), "<b style='color:#CCCCCC;'>已跳过清理操作</b>", 1500, QColor("#2D2D2D"));
 }
 
 void CategoryPanel::onRestoreAllFromTrash() {

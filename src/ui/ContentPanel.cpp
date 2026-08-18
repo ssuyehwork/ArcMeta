@@ -19,7 +19,6 @@
 #include "ThumbnailDelegate.h"
 #include "../util/ImportHelper.h"
 #include "../util/AssetImporter.h"
-#include "../core/AutoImportManager.h"
 #include "../meta/AmMetaJson.h"
 #include "../core/NavigationHistoryService.h"
 #include "ToolTipOverlay.h" 
@@ -575,8 +574,7 @@ ContentPanel::ContentPanel(QWidget* parent)
  
  
     m_diskModel = new DiskItemModel(this);
-    m_libraryModel = new LibraryAssetModel(this);
-    m_model = m_libraryModel; // 默认挂载受控逻辑库模型
+    m_model = m_diskModel; // 默认挂载纯物理磁盘导航模型
 
     m_proxyModel = new FilterProxyModel(this); 
     m_proxyModel->setSourceModel(m_model); 
@@ -593,14 +591,6 @@ ContentPanel::ContentPanel(QWidget* parent)
         }
     };
     connect(m_diskModel, &ItemModelBase::dataChanged, this, onDataChanged);
-    connect(m_libraryModel, &ItemModelBase::dataChanged, this, onDataChanged);
-
-    connect(m_libraryModel, &LibraryAssetModel::recordRenamed, this, [this](const QString& oldPath, const QString& newPath, const QString& newName) {
-        Q_UNUSED(oldPath);
-        this->setPendingSelectName(newName, false);
-        this->selectAndScrollToPath(newPath);
-        this->onSelectionChanged();
-    });
      
     // 2026-04-12 深度修复：强制锁定过滤列为第 0 列（名称列），确保搜索逻辑不偏离 
     m_proxyModel->setFilterKeyColumn(0); 
@@ -1556,44 +1546,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     act->setData(ActionCategorize); 
                     act->setProperty("catId", cat.id); 
                 } 
-            }
-        } else {
-            // [物理源：显示“迁移”]
-            if (!m_currentPath.isEmpty() && m_currentPath != "computer://") {
-                std::wstring wp = path.toStdWString();
-                std::wstring volSerial = MetadataManager::getVolumeSerialNumber(wp);
-
-                // 2026-07-xx 按照 Plan-121：统一复用 AutoImportManager 的路径计算逻辑，
-                // 不再自行拼接，确保使用完全一致的路径来源。
-                std::wstring managedRootW = AutoImportManager::getManagedLibraryPath(wp);
-                QString managedRoot = QString::fromStdWString(managedRootW);
-
-                QMenu* migrateMenu = menu.addMenu(UiHelper::getIcon("add", QColor("#FF8C00"), 18), "迁移");
-                UiHelper::applyMenuStyle(migrateMenu);
-
-                if (managedRoot.isEmpty()) {
-                    // Library 文件夹尚未创建，给出明确提示而非显示错误路径
-                    migrateMenu->addAction("该盘库存未创建")->setEnabled(false);
-                } else {
-                    QAction* actRoot = migrateMenu->addAction(managedRoot);
-                    actRoot->setData(ActionAddToCategory);
-                    actRoot->setProperty("targetPath", managedRoot);
-
-                    migrateMenu->menuAction()->setData(ActionAddToCategory);
-                    migrateMenu->menuAction()->setProperty("targetPath", managedRoot);
-                }
-
-                migrateMenu->addSeparator();
-                QStringList recentFolders = NavigationHistoryService::getRecentVisitedFolders(volSerial);
-                if (recentFolders.isEmpty()) {
-                    migrateMenu->addAction("迁移至最近活跃位置...")->setEnabled(false);
-                } else {
-                    for (const QString& folder : recentFolders) {
-                        QAction* act = migrateMenu->addAction(folder);
-                        act->setData(ActionAddToCategory);
-                        act->setProperty("targetPath", folder);
-                    }
-                }
             }
         }
 
@@ -2815,7 +2767,6 @@ void ContentPanel::restoreSelections() {
 void ContentPanel::loadDirectory(const QString& path, bool recursive) { 
     restoreActiveView(); // 🚨 强行切离开锁屏页，恢复卡片网格/列表页！
 
-    // 🚨 0 与 1 彻底断连多态自动分流：物理切断
     if (m_model != m_diskModel) {
         m_model = m_diskModel;
         m_proxyModel->setSourceModel(m_model);
@@ -2971,141 +2922,18 @@ void ContentPanel::previewFile(const QString& path) {
 } 
  
 void ContentPanel::loadCategories(const QList<int>& categoryIds) {
-    if (categoryIds.isEmpty()) return;
-     
-    // 多选统一标记为主分类数据源
-    m_currentCategoryType = "user_category";
-    m_currentCategoryId = categoryIds.first(); // 兼容单选的回退主ID
-     
-    m_isLoading = true;
-    m_loadRequestId++;
-    int reqId = m_loadRequestId;
-
-    QPointer<ContentPanel> weakThis(this);
-    (void)QtConcurrent::run([weakThis, categoryIds, reqId]() {
-        // 多选模式下递归开启标记由 CategoryLoadService 重载函数自动内部计算
-        bool isRecursive = AppConfig::instance().getValue("Category/RecursiveLoad", true).toBool();
-        std::vector<ItemRecord> allRecords;
-         
-        // 分别对所有分类 ID 加载并在数据库底层（getCategories）完成 DISTINCT 去重组装
-        for (int cid : categoryIds) {
-            auto chunk = CategoryLoadService::loadCategoryItems(cid, isRecursive);
-            allRecords.insert(allRecords.end(), chunk.begin(), chunk.end());
-        }
-
-        // 本地再进行一次 AssetPath 去重对账，保证联合数据干净整洁
-        std::vector<ItemRecord> uniqueRecords;
-        QSet<QString> seenPaths;
-        for (auto& r : allRecords) {
-            if (r.isCategory) {
-                // 多选不展示子分类卡片，只展示资产
-                continue;
-            }
-            if (!seenPaths.contains(r.path)) {
-                seenPaths.insert(r.path);
-                uniqueRecords.push_back(std::move(r));
-            }
-        }
-
-        QMetaObject::invokeMethod(weakThis.data(), [weakThis, uniqueRecords, reqId]() {
-            if (weakThis && weakThis->m_loadRequestId == reqId) {
-                weakThis->m_isLoading = false;
-                
-                // 🚨 0 与 1 彻底断连多态自动分流：逻辑切断
-                if (weakThis->m_model != weakThis->m_libraryModel) {
-                    weakThis->m_model = weakThis->m_libraryModel;
-                    weakThis->m_proxyModel->setSourceModel(weakThis->m_model);
-                }
-
-                // 平滑原子刷新 UI
-                weakThis->m_model->setRecords(uniqueRecords);
-                weakThis->m_proxyModel->invalidate();
-                weakThis->m_proxyModel->sort(0, Qt::AscendingOrder);
-                
-                weakThis->recalculateAndEmitStats();
-                weakThis->applyFilters();
-                emit weakThis->dataSourceChanged("category");
-            }
-        });
-    });
+    Q_UNUSED(categoryIds);
 }
 
 void ContentPanel::loadCategory(int categoryId) { 
-    // 🚨 0 与 1 彻底断连多态自动分流：逻辑切断
-    if (m_model != m_libraryModel) {
-        m_model = m_libraryModel;
-        m_proxyModel->setSourceModel(m_model);
-    }
-
-    Category cat = CategoryRepo::getCachedById(categoryId);
-    if (cat.id > 0) {
-        // 🚨【加锁保护拦截】：若分类加锁且当前未解锁
-        if (cat.encrypted && !CategoryLockManager::instance().isUnlocked(categoryId)) {
-            // 彻底移除阻断型模态对话框，直接使用无缝内置卡片式解锁界面进行展示
-            m_model->clear();
-            m_proxyModel->invalidate();
-            m_lockWidget->clearInput(); // 🚨【物理安全保障】：强行清空输入框中的任何残留密码，绝不给假锁屏留任何机会！
-            
-            // 解析真实的提示文本
-            QString storedData = QString::fromStdWString(cat.encryptHint);
-            QString realHint = storedData.contains(":::") ? storedData.section(":::", 1) : storedData;
-
-            m_viewStack->setCurrentWidget(m_lockWidget);
-            m_lockWidget->setCategory(categoryId, realHint);
-            if (m_textPreview) m_textPreview->hide(); 
-            if (m_imagePreview) m_imagePreview->hide(); 
-            m_currentCategoryId = categoryId;
-            m_currentCategoryType = "user_category";
-            updateLayersButtonState();
-            emit dataSourceChanged("category"); 
-            m_lockWidget->focusInput();
-            return;
-        }
-    }
-
-    // 已经解锁，将视图堆栈还原到正确的列表或网格显示页
-    restoreActiveView();
-
-    if (m_isLoading && m_currentCategoryId == categoryId && m_currentCategoryType == "user_category") {
-        return;
-    }
-
-    m_isLoading = true;
-    int reqId = ++m_loadRequestId;
-    m_currentCategoryType = "user_category";
-    m_currentCategoryId = categoryId;
-    updateLayersButtonState();
-    m_viewStack->show(); 
-    if (m_textPreview) m_textPreview->hide(); 
-    if (m_imagePreview) m_imagePreview->hide(); 
-    emit dataSourceChanged("category"); 
-     
-    QPointer<ContentPanel> weakThis(this);
-    bool isRecursive = m_isCategoryRecursive;
-    (void)QtConcurrent::run([weakThis, categoryId, reqId, isRecursive]() {
-        // 【物理隔离】数据库读取已迁出至 CategoryLoadService，本函数只负责调度与 UI 状态维护
-        std::vector<ItemRecord> allRecords = CategoryLoadService::loadCategoryItems(categoryId, isRecursive);
-        if (!weakThis) return;
-
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [weakThis, allRecords, reqId]() {
-            if (weakThis && weakThis->m_loadRequestId == reqId) {
-                weakThis->m_model->setRecords(allRecords);
-                weakThis->m_proxyModel->sort(0, Qt::AscendingOrder);
-                weakThis->m_isLoading = false;
-                weakThis->recalculateAndEmitStats();
-                weakThis->applyFilters(); 
-
-                weakThis->restoreSelections();
-            }
-        });
-    });
+    Q_UNUSED(categoryId);
 } 
  
 void ContentPanel::loadPaths(const QStringList& paths, int reqId) {
-    restoreActiveView(); // 🚨 强行切离开锁屏页，恢复卡片网格/列表页！
+    restoreActiveView();
 
-    if (m_model != m_libraryModel) {
-        m_model = m_libraryModel;
+    if (m_model != m_diskModel) {
+        m_model = m_diskModel;
         m_proxyModel->setSourceModel(m_model);
     }
 
