@@ -1587,7 +1587,7 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             menu.close(); 
         });
 
-        // 🚨【置顶 / 取消置顶】：全模式解锁！磁盘模式下写入 .ArcMeta.json，重排置顶！
+        // 🚨【置顶 / 取消置顶】：全模式解锁！磁盘模式下写入 .QuarkMeta.json，重排置顶！
         bool isPinned = currentIndex.data(IsLockedRole).toBool(); 
         menu.addAction(isPinned ? "取消置顶" : "置顶")->setData(isPinned ? ActionUnpin : ActionPin); 
 

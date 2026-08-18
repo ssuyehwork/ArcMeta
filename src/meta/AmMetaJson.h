@@ -12,10 +12,10 @@
 namespace ArcMeta {
 
 /**
- * @brief 处理 .ArcMeta.json 隐藏配置文件的读写管理类
+ * @brief 处理 .QuarkMeta.json 隐藏配置文件的读写管理类
  * 2026-08-xx 双轨架构重构：
  * 1. 全面采用纯粹、高效、结构化的 JSON 规范。
- * 2. 磁盘模式下采用标准的 .ArcMeta.json 隐藏文件直接保存在物理目录中。
+ * 2. 磁盘模式下采用标准的 .QuarkMeta.json 隐藏文件直接保存在物理目录中。
  */
 class AmMetaJson {
 public:
@@ -75,7 +75,7 @@ public:
 
 private:
     std::wstring m_folderPath;
-    std::wstring m_filePath; // 映射到物理文件夹中的 .ArcMeta.json 路径
+    std::wstring m_filePath; // 映射到物理文件夹中的 .QuarkMeta.json 路径
     
     FolderMeta m_folder;
     std::map<std::wstring, ItemMeta> m_items;

@@ -102,7 +102,7 @@ bool ShellHelper::copyOrMoveItems(const QStringList& sourcePaths, const QString&
         for (const QString& p : sourcePaths) {
             QFileInfo info(p);
             QString newPath = QDir(destDir).filePath(info.fileName());
-            // 1. 物理漫游迁移 .ArcMeta.json 元数据 
+            // 1. 物理漫游迁移 .QuarkMeta.json 元数据
             AmMetaJson::migrateItemMetadata(p, newPath); 
             // 2. 同步内存/数据库缓存 
             MetadataManager::instance().renameItem(p.toStdWString(), newPath.toStdWString());
@@ -143,7 +143,7 @@ void ShellHelper::openInExplorer(const QString& path) {
 
 bool ShellHelper::renameItem(const QString& oldPath, const QString& newPath) {
     if (QFile::rename(oldPath, newPath)) {
-        // 1. 物理漫游迁移 .ArcMeta.json 元数据 
+        // 1. 物理漫游迁移 .QuarkMeta.json 元数据
         AmMetaJson::migrateItemMetadata(oldPath, newPath);
         // 同步数据库
         MetadataManager::instance().renameItem(oldPath.toStdWString(), newPath.toStdWString());

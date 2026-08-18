@@ -211,7 +211,7 @@ void TagManagerDialog::createTag(const QString& tagName) {
         // 双轨之一：托管库模式 -> 写入 MetadataManager / SQLite
         MetadataManager::instance().setTags(m_currentPath.toStdWString(), QStringList() << tagName);
     } else {
-        // 双轨之二：磁盘导航模式 -> 写入本地 .ArcMeta.json
+        // 双轨之二：磁盘导航模式 -> 写入本地 .QuarkMeta.json
         QFileInfo info(m_currentPath);
         AmMetaJson amJson(info.absolutePath().toStdWString());
         amJson.load();

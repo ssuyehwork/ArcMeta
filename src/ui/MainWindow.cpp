@@ -324,16 +324,20 @@ void MainWindow::initUi() {
     // 1. 先应用面板显隐状态
     loadPanelVisibility();
 
+    // 强制把 categoryPanel 隐藏（QuarkMeta 模式下废除）
+    if (m_categoryPanel) m_categoryPanel->hide();
+
     // 2. 延迟至下一个事件循环（等窗口 geometry 稳定后）再恢复 SplitterState
     QByteArray state = AppConfig::instance().getValue("MainWindow/SplitterState").toByteArray();
     if (!state.isEmpty()) {
         QTimer::singleShot(0, this, [this, state]() {
             m_mainSplitter->restoreState(state);
+            if (m_categoryPanel) m_categoryPanel->hide();
         });
     } else {
-        // 初始默认分配: 230 | 230 | 600 | 230 | 230
+        // 初始默认分配: 250 (第一栏 NavPanel) | 650 (第二栏 ContentPanel) | 250 (元数据/筛选)
         QList<int> sizes;
-        sizes << 230 << 230 << 600 << 230 << 230;
+        sizes << 250 << 650 << 250 << 200;
         m_mainSplitter->setSizes(sizes);
     }
 
@@ -1504,12 +1508,15 @@ void MainWindow::setupSplitters() {
         // 其他来源（搜索、筛选等）不显示焦点线
     });
 
-    m_mainSplitter->addWidget(m_categoryPanel);
+    // 纯磁盘模式三栏布局：第一栏导航(NavPanel)，第二栏（内容区/原ArcMeta逻辑已纯化），第三栏元数据/筛选
     m_mainSplitter->addWidget(m_navPanel);
     m_mainSplitter->addWidget(m_contentPanel);
     m_mainSplitter->addWidget(m_metaPanel);
     m_mainSplitter->addWidget(m_filterPanel);
     m_mainSplitter->addWidget(m_tagManagerView);
+
+    // CategoryPanel 处于隐藏并禁用状态
+    m_categoryPanel->hide();
 
     // 2026-07-xx 按照用户要求：标签搜索联动
     connect(m_tagManagerView, &TagManagerView::requestSearchTag, this, [this](const QString& tag) {

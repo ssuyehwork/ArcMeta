@@ -121,7 +121,7 @@ Cache-*/
 *.dmp
 *.BridgeSort
 *.BridgeLabelsAndRatings
-*.ArcMeta.json
+*.QuarkMeta.json
 
 # 忽略 CMake 生成内容
 CMakeFiles/

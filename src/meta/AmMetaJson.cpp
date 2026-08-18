@@ -19,8 +19,8 @@ AmMetaJson::AmMetaJson(const std::wstring& folderPath)
     if (!path.empty() && path.back() != L'\\' && path.back() != L'/') {
         path += L'\\';
     }
-    // 🚨 彻底废除 .am_meta.json，唯一物理文件名：.ArcMeta.json
-    m_filePath = path + L".ArcMeta.json";
+    // 🚨 彻底废除 .am_meta.json，唯一物理文件名：.QuarkMeta.json
+    m_filePath = path + L".QuarkMeta.json";
 }
 
 bool AmMetaJson::load() {
@@ -164,7 +164,7 @@ bool AmMetaJson::migrateItemMetadata(const QString& oldFilePath, const QString& 
     std::wstring oldFileName = oldInfo.fileName().toStdWString(); 
     std::wstring newFileName = newInfo.fileName().toStdWString(); 
  
-    // 1. 从源目录的 .ArcMeta.json 读取元数据 
+    // 1. 从源目录的 .QuarkMeta.json 读取元数据
     AmMetaJson oldJson(oldParent.toStdWString()); 
     if (!oldJson.load()) return false; 
  
@@ -181,7 +181,7 @@ bool AmMetaJson::migrateItemMetadata(const QString& oldFilePath, const QString& 
     oldItems.erase(it); 
     oldJson.save(); 
  
-    // 3. 将元数据注入到目标目录的 .ArcMeta.json 
+    // 3. 将元数据注入到目标目录的 .QuarkMeta.json
     AmMetaJson newJson(newParent.toStdWString()); 
     newJson.load(); // 加载或自动初始化 
     newJson.items()[newFileName] = metaCopy; 
@@ -191,9 +191,9 @@ bool AmMetaJson::migrateItemMetadata(const QString& oldFilePath, const QString& 
 bool AmMetaJson::migrateFolderCache(const QString& oldFolderPath, const QString& newFolderPath) {
     if (oldFolderPath == newFolderPath) return true;
     
-    // 物理自愈：当发生物理文件夹重命名时，自动原子迁移其目录内部隐藏的 .ArcMeta.json 配置
-    QString oldMetaFile = oldFolderPath + "/.ArcMeta.json";
-    QString newMetaFile = newFolderPath + "/.ArcMeta.json";
+    // 物理自愈：当发生物理文件夹重命名时，自动原子迁移其目录内部隐藏的 .QuarkMeta.json 配置
+    QString oldMetaFile = oldFolderPath + "/.QuarkMeta.json";
+    QString newMetaFile = newFolderPath + "/.QuarkMeta.json";
 
     if (QFile::exists(oldMetaFile)) {
         // 创建新物理目录（如果不存在）
