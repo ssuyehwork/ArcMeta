@@ -33,7 +33,7 @@
 #include "MediaExtractorPipeline.h"
 #include "../util/ShellHelper.h"
 #include "sqlite3.h"
-#include "AmMetaJson.h"
+#include "QuarkMetaJson.h"
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -1712,9 +1712,9 @@ void MetadataManager::renameBatchAsync(
             QFileInfo oldFileInfo(QString::fromStdWString(pair.first));
             QFileInfo newFileInfo(QString::fromStdWString(pair.second));
             if (oldFileInfo.isDir()) {
-                AmMetaJson::migrateFolderCache(oldFileInfo.absoluteFilePath(), newFileInfo.absoluteFilePath());
+                QuarkMetaJson::migrateFolderCache(oldFileInfo.absoluteFilePath(), newFileInfo.absoluteFilePath());
             } else {
-                AmMetaJson::renameItem(oldFileInfo.absolutePath(), oldFileInfo.fileName(), newFileInfo.fileName());
+                QuarkMetaJson::renameItem(oldFileInfo.absolutePath(), oldFileInfo.fileName(), newFileInfo.fileName());
             }
         }
 
@@ -1918,9 +1918,9 @@ void MetadataManager::renameItem(const std::wstring& oldPath, const std::wstring
             QFileInfo oldFileInfo(QString::fromStdWString(pair.first));
             QFileInfo newFileInfo(QString::fromStdWString(pair.second));
             if (oldFileInfo.isDir()) {
-                AmMetaJson::migrateFolderCache(oldFileInfo.absoluteFilePath(), newFileInfo.absoluteFilePath());
+                QuarkMetaJson::migrateFolderCache(oldFileInfo.absoluteFilePath(), newFileInfo.absoluteFilePath());
             } else {
-                AmMetaJson::renameItem(oldFileInfo.absolutePath(), oldFileInfo.fileName(), newFileInfo.fileName());
+                QuarkMetaJson::renameItem(oldFileInfo.absolutePath(), oldFileInfo.fileName(), newFileInfo.fileName());
             }
         }
 

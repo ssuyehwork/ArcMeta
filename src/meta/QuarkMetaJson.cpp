@@ -1,4 +1,4 @@
-#include "AmMetaJson.h"
+#include "QuarkMetaJson.h"
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
@@ -13,7 +13,7 @@
 
 namespace ArcMeta {
 
-AmMetaJson::AmMetaJson(const std::wstring& folderPath)
+QuarkMetaJson::QuarkMetaJson(const std::wstring& folderPath)
     : m_folderPath(folderPath) {
     std::wstring path = folderPath;
     if (!path.empty() && path.back() != L'\\' && path.back() != L'/') {
@@ -23,7 +23,7 @@ AmMetaJson::AmMetaJson(const std::wstring& folderPath)
     m_filePath = path + L".QuarkMeta.json";
 }
 
-bool AmMetaJson::load() {
+bool QuarkMetaJson::load() {
     QFile file(toQString(m_filePath));
     if (!file.exists()) {
         m_folder = FolderMeta();
@@ -53,7 +53,7 @@ bool AmMetaJson::load() {
     return true;
 }
 
-bool AmMetaJson::save() const {
+bool QuarkMetaJson::save() const {
     QJsonObject root;
     root.insert("version", "2");
     root.insert("folder", folderToEntry(m_folder));
@@ -83,9 +83,9 @@ bool AmMetaJson::save() const {
     return true;
 }
 
-bool AmMetaJson::renameItem(const QString& folderPath, const QString& oldName, const QString& newName) {
+bool QuarkMetaJson::renameItem(const QString& folderPath, const QString& oldName, const QString& newName) {
     if (oldName == newName) return true;
-    AmMetaJson meta(folderPath.toStdWString());
+    QuarkMetaJson meta(folderPath.toStdWString());
     if (!meta.load()) return false;
     auto& items = meta.items();
     auto it = items.find(oldName.toStdWString());
@@ -97,9 +97,9 @@ bool AmMetaJson::renameItem(const QString& folderPath, const QString& oldName, c
     return true;
 }
 
-std::unordered_map<std::wstring, ItemMeta> AmMetaJson::readFolderMeta(const std::wstring& folderPath) {
+std::unordered_map<std::wstring, ItemMeta> QuarkMetaJson::readFolderMeta(const std::wstring& folderPath) {
     std::unordered_map<std::wstring, ItemMeta> result;
-    AmMetaJson meta(folderPath);
+    QuarkMetaJson meta(folderPath);
     if (meta.load()) {
         const auto& itemsMap = meta.items();
         for (const auto& pair : itemsMap) {
@@ -109,12 +109,12 @@ std::unordered_map<std::wstring, ItemMeta> AmMetaJson::readFolderMeta(const std:
     return result;
 }
 
-void AmMetaJson::updateItemMeta(const std::wstring& filePath, std::function<void(ItemMeta&)> updater) {
+void QuarkMetaJson::updateItemMeta(const std::wstring& filePath, std::function<void(ItemMeta&)> updater) {
     QFileInfo info(QString::fromStdWString(filePath));
     std::wstring folderPath = info.absolutePath().toStdWString();
     std::wstring fileName = info.fileName().toStdWString();
 
-    AmMetaJson parentJson(folderPath);
+    QuarkMetaJson parentJson(folderPath);
     parentJson.load();
     ItemMeta& meta = parentJson.items()[fileName];
     meta.type = info.isDir() ? L"folder" : L"file";
@@ -122,7 +122,7 @@ void AmMetaJson::updateItemMeta(const std::wstring& filePath, std::function<void
     parentJson.save();
 
     if (info.isDir()) {
-        AmMetaJson selfJson(filePath);
+        QuarkMetaJson selfJson(filePath);
         selfJson.load();
         
         FolderMeta& fMeta = selfJson.folder();
@@ -153,7 +153,7 @@ void AmMetaJson::updateItemMeta(const std::wstring& filePath, std::function<void
     }
 }
 
-bool AmMetaJson::migrateItemMetadata(const QString& oldFilePath, const QString& newFilePath) { 
+bool QuarkMetaJson::migrateItemMetadata(const QString& oldFilePath, const QString& newFilePath) {
     if (oldFilePath == newFilePath) return true; 
  
     QFileInfo oldInfo(oldFilePath); 
@@ -165,7 +165,7 @@ bool AmMetaJson::migrateItemMetadata(const QString& oldFilePath, const QString& 
     std::wstring newFileName = newInfo.fileName().toStdWString(); 
  
     // 1. 从源目录的 .QuarkMeta.json 读取元数据
-    AmMetaJson oldJson(oldParent.toStdWString()); 
+    QuarkMetaJson oldJson(oldParent.toStdWString());
     if (!oldJson.load()) return false; 
  
     auto& oldItems = oldJson.items(); 
@@ -182,13 +182,13 @@ bool AmMetaJson::migrateItemMetadata(const QString& oldFilePath, const QString& 
     oldJson.save(); 
  
     // 3. 将元数据注入到目标目录的 .QuarkMeta.json
-    AmMetaJson newJson(newParent.toStdWString()); 
+    QuarkMetaJson newJson(newParent.toStdWString());
     newJson.load(); // 加载或自动初始化 
     newJson.items()[newFileName] = metaCopy; 
     return newJson.save(); // 100% 物理落盘并保持隐藏属性 
 }
 
-bool AmMetaJson::migrateFolderCache(const QString& oldFolderPath, const QString& newFolderPath) {
+bool QuarkMetaJson::migrateFolderCache(const QString& oldFolderPath, const QString& newFolderPath) {
     if (oldFolderPath == newFolderPath) return true;
     
     // 物理自愈：当发生物理文件夹重命名时，自动原子迁移其目录内部隐藏的 .QuarkMeta.json 配置
@@ -215,7 +215,7 @@ bool AmMetaJson::migrateFolderCache(const QString& oldFolderPath, const QString&
 
 // --- 内部 JSON 结构转换实现 ---
 
-QJsonObject AmMetaJson::folderToEntry(const FolderMeta& meta) {
+QJsonObject QuarkMetaJson::folderToEntry(const FolderMeta& meta) {
     QJsonObject obj;
     obj.insert("sort_by", toQString(meta.sortBy));
     obj.insert("sort_order", toQString(meta.sortOrder));
@@ -244,7 +244,7 @@ QJsonObject AmMetaJson::folderToEntry(const FolderMeta& meta) {
     return obj;
 }
 
-FolderMeta AmMetaJson::entryToFolder(const QJsonObject& obj) {
+FolderMeta QuarkMetaJson::entryToFolder(const QJsonObject& obj) {
     FolderMeta meta;
     meta.sortBy = toStdWString(obj.value("sort_by").toString("name"));
     meta.sortOrder = toStdWString(obj.value("sort_order").toString("asc"));
@@ -270,7 +270,7 @@ FolderMeta AmMetaJson::entryToFolder(const QJsonObject& obj) {
     return meta;
 }
 
-QJsonObject AmMetaJson::itemToEntry(const ItemMeta& meta) {
+QJsonObject QuarkMetaJson::itemToEntry(const ItemMeta& meta) {
     QJsonObject obj;
     obj.insert("type", toQString(meta.type));
     obj.insert("rating", meta.rating);
@@ -311,7 +311,7 @@ QJsonObject AmMetaJson::itemToEntry(const ItemMeta& meta) {
     return obj;
 }
 
-ItemMeta AmMetaJson::entryToItem(const QJsonObject& obj) {
+ItemMeta QuarkMetaJson::entryToItem(const QJsonObject& obj) {
     ItemMeta meta;
     meta.type = toStdWString(obj.value("type").toString("file"));
     meta.rating = obj.value("rating").toInt();

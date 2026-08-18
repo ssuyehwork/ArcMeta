@@ -17,7 +17,7 @@ namespace ArcMeta {
  * 1. 全面采用纯粹、高效、结构化的 JSON 规范。
  * 2. 磁盘模式下采用标准的 .QuarkMeta.json 隐藏文件直接保存在物理目录中。
  */
-class AmMetaJson {
+class QuarkMetaJson {
 public:
     /**
      * @brief 物理整体迁移/重命名文件夹缓存接口（历史兼容，在直接保存模式下，重命名会自动由操作系统物理转移子文件）
@@ -34,7 +34,7 @@ public:
     /**
      * @param folderPath 目标物理文件夹的完整路径
      */
-    explicit AmMetaJson(const std::wstring& folderPath);
+    explicit QuarkMetaJson(const std::wstring& folderPath);
 
     /**
      * @brief 从对应位置加载 JSON 配置文件

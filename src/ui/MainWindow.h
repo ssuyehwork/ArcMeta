@@ -23,7 +23,6 @@ class HoverEventFilter;
 class ResizeEventFilter;
 class AddressBar;
 class TaskProgressToolBar;
-class CategoryPanel;
 class NavPanel;
 class ContentPanel;
 class MetaPanel;
@@ -135,7 +134,6 @@ private:
     AddressBar* m_addressBar = nullptr;
 
     // 六个面板
-    CategoryPanel* m_categoryPanel = nullptr;
     // 2026-04-11 按照用户要求：记录当前预览的文件路径，用于驱动方向键切图
     QString m_currentQuickLookPath;
     

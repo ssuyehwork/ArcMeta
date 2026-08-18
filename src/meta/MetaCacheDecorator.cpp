@@ -1,5 +1,5 @@
 #include "MetaCacheDecorator.h" 
-#include "AmMetaJson.h" 
+#include "QuarkMetaJson.h"
 #include <QFileInfo> 
 #include <unordered_map> 
 #include <memory> 
@@ -9,7 +9,7 @@ void MetaCacheDecorator::decorate(std::vector<ItemRecord>& records) {
     if (records.empty()) return; 
  
     // 按父目录路径建立离散 JSON 缓存池，避免重复读取同一目录的配置文件 
-    std::unordered_map<std::wstring, std::shared_ptr<AmMetaJson>> jsonCacheMap; 
+    std::unordered_map<std::wstring, std::shared_ptr<QuarkMetaJson>> jsonCacheMap;
  
     for (auto& itemRec : records) { 
         if (itemRec.isCategory) continue; 
@@ -19,7 +19,7 @@ void MetaCacheDecorator::decorate(std::vector<ItemRecord>& records) {
  
         auto cacheIt = jsonCacheMap.find(dirPath); 
         if (cacheIt == jsonCacheMap.end()) { 
-            auto jsonCache = std::make_shared<AmMetaJson>(dirPath); 
+            auto jsonCache = std::make_shared<QuarkMetaJson>(dirPath);
             jsonCache->load(); 
             jsonCacheMap[dirPath] = jsonCache; 
             cacheIt = jsonCacheMap.find(dirPath); 

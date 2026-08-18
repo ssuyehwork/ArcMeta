@@ -6,7 +6,7 @@
 #include <QDateTime>
 #include <QFileInfo>
 #include <QDir>
-#include "../meta/AmMetaJson.h"
+#include "../meta/QuarkMetaJson.h"
 #include "../ui/MediaColorExtractor.h" // 🚨 补全头文件引入
 #include "../../util/DiskMediaExtractor.h"
 #include "../DiskBatchRenameService.h"
@@ -85,7 +85,7 @@ void DiskItemModel::updateRecordMetadata(const QString& path) {
             QString parentDir = QDir::toNativeSeparators(fileInfo.absolutePath());
             QString fileName = fileInfo.fileName();
 
-            AmMetaJson jsonCache(parentDir.toStdWString());
+            QuarkMetaJson jsonCache(parentDir.toStdWString());
             jsonCache.load();
             const auto& cachedItems = jsonCache.items();
             auto cachedIt = cachedItems.find(fileName.toStdWString());
@@ -183,7 +183,7 @@ bool DiskItemModel::setData(const QModelIndex& index, const QVariant& value, int
 
     bool metaUpdated = false;
 
-    AmMetaJson jsonCache(parentDir.toStdWString());
+    QuarkMetaJson jsonCache(parentDir.toStdWString());
     jsonCache.load();
     auto& cachedItems = jsonCache.items();
     

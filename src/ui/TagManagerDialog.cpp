@@ -2,7 +2,7 @@
 #include "UiHelper.h"
 #include "StyleLibrary.h"
 #include "../meta/CategoryRepo.h"
-#include "../meta/AmMetaJson.h"
+#include "../meta/QuarkMetaJson.h"
 #include "components/FlowLayout.h"
 #include <QApplication>
 #include <QScreen>
@@ -213,7 +213,7 @@ void TagManagerDialog::createTag(const QString& tagName) {
     } else {
         // 双轨之二：磁盘导航模式 -> 写入本地 .QuarkMeta.json
         QFileInfo info(m_currentPath);
-        AmMetaJson amJson(info.absolutePath().toStdWString());
+        QuarkMetaJson amJson(info.absolutePath().toStdWString());
         amJson.load();
         ItemMeta& item = amJson.items()[info.fileName().toStdWString()];
         
@@ -240,7 +240,7 @@ void TagManagerDialog::refreshTags() {
         m_allTagCounts = MetadataManager::instance().getAllTags();
     } else {
         QFileInfo info(m_currentPath);
-        AmMetaJson amJson(info.absolutePath().toStdWString());
+        QuarkMetaJson amJson(info.absolutePath().toStdWString());
         amJson.load();
         m_allTagCounts.clear();
         for (const auto& [name, item] : amJson.items()) {

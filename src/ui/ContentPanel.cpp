@@ -19,7 +19,7 @@
 #include "ThumbnailDelegate.h"
 #include "../util/ImportHelper.h"
 #include "../util/AssetImporter.h"
-#include "../meta/AmMetaJson.h"
+#include "../meta/QuarkMetaJson.h"
 #include "../core/NavigationHistoryService.h"
 #include "ToolTipOverlay.h" 
 #include "MainWindow.h"
@@ -83,7 +83,6 @@
 #include "../crypto/EncryptionManager.h" 
 #include "CategoryLockDialog.h" 
 #include "CategoryLockWidget.h"
-#include "CategoryPanel.h"
 #include "BatchRenameDialog.h" 
 #include "BatchCreateDialog.h"
 #include "UiHelper.h" 
@@ -772,19 +771,6 @@ void ContentPanel::initUi() {
     m_viewStack->setCurrentWidget(m_gridView); 
 
     connect(m_lockWidget, &CategoryLockWidget::unlocked, this, [this](int id) { 
-        MainWindow* mw = nullptr; 
-        QWidget* parentWin = window(); 
-        while (parentWin) { 
-            if ((mw = qobject_cast<MainWindow*>(parentWin))) break; 
-            parentWin = parentWin->parentWidget(); 
-        } 
-        if (mw) { 
-            CategoryPanel* cp = mw->findChild<CategoryPanel*>(); 
-            if (cp) { 
-                cp->syncUnlockedIds(); 
-                cp->expandCategory(id); 
-            } 
-        } 
         loadCategory(id); 
     }); 
  
@@ -2013,16 +1999,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
                     trans.commit();
                 }
                 
-                MainWindow* mw = nullptr;
-                QWidget* parentWin = window();
-                while (parentWin) {
-                    if ((mw = qobject_cast<MainWindow*>(parentWin))) break;
-                    parentWin = parentWin->parentWidget();
-                }
-                if (mw) {
-                    CategoryPanel* cp = mw->findChild<CategoryPanel*>();
-                    if (cp) cp->requestRefresh(true);
-                }
                 refreshAll();
                 ToolTipOverlay::instance()->showText(QCursor::pos(), QString("已成功批量创建 %1 个分类").arg(renderedNames.size()), 2000, Style::SuccessGreen);
                 break;
@@ -2065,17 +2041,6 @@ void ContentPanel::onCustomContextMenuRequested(const QPoint& pos) {
             CategoryRepo::refreshMemoryCache();
             StatisticsService::instance().requestFullRecountAsync();
 
-            // 2. 通知侧边栏 CategoryPanel 立即重绘计数
-            MainWindow* mw = nullptr;
-            QWidget* parentWin = window();
-            while (parentWin) {
-                if ((mw = qobject_cast<MainWindow*>(parentWin))) break;
-                parentWin = parentWin->parentWidget();
-            }
-            if (mw) {
-                CategoryPanel* cp = mw->findChild<CategoryPanel*>();
-                if (cp) cp->requestRefresh(true);
-            }
 
             // 3. 刷新内容区视图
             refreshAll();

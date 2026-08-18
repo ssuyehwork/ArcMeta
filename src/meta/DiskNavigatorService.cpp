@@ -9,7 +9,7 @@ DiskNavigatorService& DiskNavigatorService::instance() {
 }
 
 std::unordered_map<std::wstring, ItemMeta> DiskNavigatorService::loadDirectoryItems(const std::wstring& folderPath) {
-    return AmMetaJson::readFolderMeta(folderPath);
+    return QuarkMetaJson::readFolderMeta(folderPath);
 }
 
 bool DiskNavigatorService::getItemMeta(const std::wstring& filePath, ItemMeta& outMeta) {
@@ -19,7 +19,7 @@ bool DiskNavigatorService::getItemMeta(const std::wstring& filePath, ItemMeta& o
 
     if (parentDir.empty()) return false;
 
-    auto items = AmMetaJson::readFolderMeta(parentDir);
+    auto items = QuarkMetaJson::readFolderMeta(parentDir);
     auto it = items.find(fileName);
     if (it != items.end()) {
         outMeta = it->second;
@@ -29,12 +29,12 @@ bool DiskNavigatorService::getItemMeta(const std::wstring& filePath, ItemMeta& o
 }
 
 void DiskNavigatorService::saveItemMeta(const std::wstring& filePath, std::function<void(ItemMeta&)> updater) {
-    AmMetaJson::updateItemMeta(filePath, updater);
+    QuarkMetaJson::updateItemMeta(filePath, updater);
 }
 
 void DiskNavigatorService::handleDiskRename(const std::wstring& oldPath, const std::wstring& newPath, bool isDir) {
     Q_UNUSED(isDir);
-    AmMetaJson::migrateItemMetadata(QString::fromStdWString(oldPath), QString::fromStdWString(newPath));
+    QuarkMetaJson::migrateItemMetadata(QString::fromStdWString(oldPath), QString::fromStdWString(newPath));
 }
 
 } // namespace ArcMeta

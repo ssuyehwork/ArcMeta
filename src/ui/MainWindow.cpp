@@ -13,9 +13,7 @@
 #include "ResizeEventFilter.h"
 #include "AddressBar.h"
 #include "../core/CoreController.h"
-#include "CategoryPanel.h"
 #include "ColorPicker.h"
-#include "CategoryModel.h"
 #include "NavPanel.h"
 #include "ContentPanel.h"
 #include "MetaPanel.h"
@@ -324,15 +322,11 @@ void MainWindow::initUi() {
     // 1. 先应用面板显隐状态
     loadPanelVisibility();
 
-    // 强制把 categoryPanel 隐藏（QuarkMeta 模式下废除）
-    if (m_categoryPanel) m_categoryPanel->hide();
-
     // 2. 延迟至下一个事件循环（等窗口 geometry 稳定后）再恢复 SplitterState
     QByteArray state = AppConfig::instance().getValue("MainWindow/SplitterState").toByteArray();
     if (!state.isEmpty()) {
         QTimer::singleShot(0, this, [this, state]() {
             m_mainSplitter->restoreState(state);
-            if (m_categoryPanel) m_categoryPanel->hide();
         });
     } else {
         // 初始默认分配: 250 (第一栏 NavPanel) | 650 (第二栏 ContentPanel) | 250 (元数据/筛选)
@@ -374,178 +368,10 @@ void MainWindow::initUi() {
         }
     });
 
-    // 1a. 分类选择多选与单选并存联动 -> 统一导航中枢 (Plan-56)
-    connect(m_categoryPanel, &CategoryPanel::categoriesSelected, this, [this](const QList<int>& ids, const QStringList& /*names*/, const QString& type) {
-        if (type == "category") {
-            QStringList idStrs;
-            for (int id : ids) idStrs.append(QString::number(id));
-            QString compoundId = idStrs.join(",");
-            QString compoundName = QString("已选择 %1 个分类").arg(ids.size());
-            unifiedNavigateTo(kProtocolCategory + compoundId + "?name=" + compoundName);
-        }
-    });
-
     connect(&VolumeOnlineManager::instance(), &VolumeOnlineManager::volumeStateChanged,
             this, [this](const QString& driveLetter, bool isOnline) {
         if (!isOnline) {
             onVolumeUnplugged(driveLetter);
-        } else {
-            if (m_categoryPanel) m_categoryPanel->requestRefresh(true);
-        }
-    });
-
-    connect(m_categoryPanel, &CategoryPanel::categorySelected, this, [this](int id, const QString& name, const QString& type, const QString& path) {
-        m_currentCategoryId = id;
-        
-        // 标签管理模式属于特殊 UI 模式，暂时保持独立
-        if (type == "tags") {
-            m_navPanel->hide(); m_contentPanel->hide(); m_metaPanel->hide(); m_filterPanel->hide();
-            m_tagManagerView->refresh(); m_tagManagerView->show();
-            m_isTagManagerMode = true;
-            if (m_addressBar) m_addressBar->setPath("标签管理");
-            if (m_searchEdit && !m_searchEdit->text().isEmpty()) m_tagManagerView->search(m_searchEdit->text().trimmed());
-            return;
-        } else if (m_isTagManagerMode) {
-            m_tagManagerView->hide(); m_navPanel->show(); m_contentPanel->show(); m_metaPanel->show(); m_filterPanel->show();
-            m_isTagManagerMode = false;
-        }
-
-        // 构建协议 URL 并跳转
-        if (type == "category") {
-            unifiedNavigateTo(kProtocolCategory + QString::number(id) + "?name=" + name);
-        } else if (type == "bookmark" && !path.isEmpty()) {
-            unifiedNavigateTo(path);
-        } else if (type == "all" || type == "uncategorized" || type == "untagged" || 
-                   type == "recently_visited" || type == "trash") {
-            unifiedNavigateTo(kProtocolSystem + type);
-        } else {
-            // 回滚：对于未识别的系统项，仅执行搜索展示
-            if (m_searchEdit) { m_searchEdit->blockSignals(true); m_searchEdit->clear(); m_searchEdit->blockSignals(false); }
-            if (m_addressBar) m_addressBar->setPath("分类: " + name);
-            if (!name.isEmpty()) m_contentPanel->search(name);
-        }
-    });
-
-    // 监听侧边栏分类拖拽事件，交由专用的 CategoryDropProcessor 进行后台处理与三大件协同
-    connect(m_categoryPanel, &CategoryPanel::pathsDroppedToCategory, this, [this](const QStringList& paths, int targetCatId) { 
-        if (paths.isEmpty()) return; 
- 
-        CategoryDropProcessor* processor = new CategoryDropProcessor(this); 
-        
-        // 1. 响应进度更新并展现底栏工具栏
-        connect(processor, &CategoryDropProcessor::progressUpdated, this, [this](int processed, int total, int remainingSeconds) {
-            if (m_statusBarWidget) m_statusBarWidget->hide();
-            if (m_taskProgressToolBar) {
-                m_taskProgressToolBar->show();
-                m_taskProgressToolBar->updateProgress(processed, total, remainingSeconds);
-            }
-        });
-
-        // 2. 点击底栏 '×' 触发取消
-        connect(m_taskProgressToolBar, &TaskProgressToolBar::cancelRequested, this, [processor]() {
-            processor->cancel();
-        });
-
-        // 3. 异步处理完成回调：刷新 UI，展示完成状态并启动后台查重
-        connect(processor, &CategoryDropProcessor::processingFinished, this, [this, processor, targetCatId](bool success, int itemCount, const QStringList& newlyImportedPaths) { 
-            Q_UNUSED(success); 
-            
-            m_categoryPanel->requestRefresh(true); 
-            m_contentPanel->refreshAll(); 
-             
-            if (m_taskProgressToolBar) {
-                m_taskProgressToolBar->showCompleted(itemCount, itemCount);
-            }
-
-            // 延迟 3 秒后隐藏进度条并切回常规状态栏
-            QTimer::singleShot(3000, this, [this]() {
-                if (m_taskProgressToolBar) m_taskProgressToolBar->hide();
-                if (m_statusBarWidget) m_statusBarWidget->show();
-            });
-
-            // 启动后台查重管网：
-            if (!newlyImportedPaths.isEmpty()) {
-                (void)QtConcurrent::run([this, newlyImportedPaths, targetCatId]() {
-                    auto conflicts = DuplicateDetectorService::detectDuplicates(newlyImportedPaths);
-                    if (!conflicts.empty()) {
-                        QMetaObject::invokeMethod(this, [this, conflicts, targetCatId]() {
-                            int totalCount = static_cast<int>(conflicts.size());
-                            bool batchApplied = false;
-                            DuplicateResolveAction batchAction = DuplicateResolveAction::UseExisting;
-
-                            for (auto group : conflicts) {
-                                DuplicateResolveAction chosenAction;
-                                if (batchApplied) {
-                                    chosenAction = batchAction;
-                                } else {
-                                    // 按需延迟加载缩略图及宽高特征
-                                    group.existingItem.thumbnail = CapsuleMediaExtractor::getCapsuleThumbnailReadOnly(group.existingItem.path);
-                                    group.newItem.thumbnail = DiskMediaExtractor::getDiskThumbnail(group.newItem.path, 256);
-                                    group.newItem.width = group.newItem.thumbnail.width();
-                                    group.newItem.height = group.newItem.thumbnail.height();
-
-                                    DuplicateConflictDialog dlg(group, totalCount, this);
-                                    if (dlg.exec() != QDialog::Accepted) break;
-
-                                    chosenAction = dlg.selectedAction();
-                                    if (dlg.applyToAll()) {
-                                        batchApplied = true;
-                                        batchAction = chosenAction;
-                                    }
-                                }
-
-                                if (chosenAction == DuplicateResolveAction::UseExisting) {
-                                    std::wstring newWPath = group.newItem.path.toStdWString();
-                                    std::string newFid = MetadataManager::instance().getFolderIdSync(newWPath);
-
-                                    // 1. 【核心修复】：在删除新文件之前，先提取新文件在导入时绑定的真实分类列表（例如新建的 "pin" 分类 ID）
-                                    std::vector<int> boundCatIds = CategoryRepo::getItemCategoryIds(newFid, newWPath);
-
-                                    // 2. 如果新文件没有独立分类（例如单文件拖入），则回退使用外层传入的目标分类 targetCatId
-                                    if (boundCatIds.empty() && targetCatId > 0) {
-                                        boundCatIds.push_back(targetCatId);
-                                    }
-
-                                    // 3. 【核心修复】：将资源库里已存在的那个老文件，绑定到新分类名下
-                                    for (int cid : boundCatIds) {
-                                        if (cid > 0) {
-                                            CategoryRepo::addItemToCategory(cid, group.existingItem.folderId.toStdString(), group.existingItem.path.toStdWString());
-                                        }
-                                    }
-
-                                    // 4. 清理多余的新文件与胶囊记录（避免重复占用磁盘）
-                                    QFile::remove(group.newItem.path);
-                                    MetadataManager::instance().removeMetadataSync(newWPath);
-                                }
-                            }
-                            m_categoryPanel->requestRefresh(true);
-                            m_contentPanel->refreshAll();
-                        });
-                    }
-                });
-            }
-
-            processor->deleteLater(); 
-        }); 
-         
-        processor->processDroppedPathsAsync(paths, targetCatId); 
-    });
-
-    // 1b. 内容面板内部跳转分类 (双击同步) -> 统一导航中枢 (Plan-56)
-    connect(m_contentPanel, &ContentPanel::categoryClicked, this, [this](int id) {
-        // 通过 Repo 获取分类名称以构建完整的协议 URL
-        auto all = CategoryRepo::getAll();
-        QString name = QString::number(id);
-        for(const auto& cat : all) if(cat.id == id) { name = QString::fromStdWString(cat.name); break; }
-        unifiedNavigateTo(kProtocolCategory + QString::number(id) + "?name=" + name);
-    });
-
-    // 2026-11-xx: 当用户点击新建逻辑子文件夹时，由此信号驱动侧边栏进行无缝联动
-    // 绑定 requestCreateSubCategory 信号到侧边栏 CategoryPanel 的创建方法（对应用户原话：“绑定 requestCreateSubCategory 信号到侧边栏 CategoryPanel 的创建方法”）
-    connect(m_contentPanel, &ContentPanel::requestCreateSubCategory, this, [this](int parentCatId) {
-        if (m_categoryPanel) {
-            m_categoryPanel->selectCategory(parentCatId);
-            m_categoryPanel->onCreateSubCategory();
         }
     });
 
@@ -958,78 +784,12 @@ void MainWindow::initUi() {
         }
     });
 
-    // 解绑分类事件响应
-    connect(m_metaPanel, &MetaPanel::unbindCategoryRequested, this, [this](const QString& path, int catId) {
-        std::string fid = MetadataManager::instance().getFolderIdSync(path.toStdWString());
-        if (!fid.empty()) {
-            CategoryRepo::removeItemFromCategory(catId, fid);
-            if (m_categoryPanel) m_categoryPanel->requestRefresh(true);
-            m_contentPanel->updateItemMetadata(path);
-        }
-    });
-
-    // 绑定分类事件响应
-    connect(m_metaPanel, &MetaPanel::bindCategoryRequested, this, [this](const QString& path) {
-        // 触发绑定逻辑，弹出分类选择列表
-        Q_UNUSED(path);
-    });
-
-    // 9. 2026-03-xx 响应元数据全局变更，同步刷新 UI (合并优化，消除重复连接与性能损耗)
-    m_sidebarRefreshTimer = new QTimer(this);
-    m_sidebarRefreshTimer->setInterval(800);
-    m_sidebarRefreshTimer->setSingleShot(true);
-
-    connect(m_sidebarRefreshTimer, &QTimer::timeout, this, [this]() {
-        if (m_categoryPanel) m_categoryPanel->requestRefresh();
-    });
-
     connect(&MetadataManager::instance(), &MetadataManager::metaChanged, this, [this](const QString& path) {
-        // 1. 全局内容区与侧边栏同步
         if (path == "__RELOAD_ALL__") {
             m_contentPanel->refreshAll();
-            if (m_categoryPanel) {
-                m_categoryPanel->requestRefresh(true);
-            }
             return;
         }
-
-        if (path == "__RELOAD_CATEGORY_ONLY__") {
-            if (m_categoryPanel) {
-                m_categoryPanel->requestRefresh(true);
-            }
-            return;
-        }
-
-        // 2. 局部路径更新
         m_contentPanel->updateItemMetadata(path);
-
-        // 🚨 3. 彻底删掉实时选择反馈：不要在 metaChanged 里重新触发 selectionChanged！防止连锁反馈死循环和抢锁导致的假死
-        /*
-        auto indexes = m_contentPanel->getSelectedIndexes();
-        if (!indexes.isEmpty()) {
-            if (indexes.first().data(PathRole).toString() == path) {
-                emit m_contentPanel->selectionChanged({path});
-            }
-        }
-        */
-
-        // 4. 侧边栏防抖刷新
-        if (m_categoryPanel) {
-            m_sidebarRefreshTimer->start(); // 重置计时器
-        }
-    });
-
-    // 10. 侧边栏点击物理项（文件预览或文件夹跳转）
-    // 2026-05-27 物理加固：补全 this 上下文
-    connect(m_categoryPanel, &CategoryPanel::fileSelected, this, [this](const QString& path) {
-        QFileInfo fi(path);
-        if (fi.isDir()) {
-            // 如果是文件夹，执行界面跳转联动
-            unifiedNavigateTo(path);
-        } else {
-            // 2026-03-xx 按照用户要求：侧边栏选中任何物理文件，立即执行即时全能预览
-            m_contentPanel->previewFile(path);
-        }
     });
 
     m_elapsedTimer = new QTimer(this);
@@ -1147,16 +907,12 @@ void MainWindow::showEvent(QShowEvent* event) {
     if (!m_panelsInitialized) {
         m_panelsInitialized = true;
         QTimer::singleShot(0, [this]() {
-            if (m_categoryPanel) {
-                m_categoryPanel->deferredInit();
-            }
             if (m_navPanel) {
                 m_navPanel->deferredInit();
             }
             if (m_contentPanel) {
                 m_contentPanel->deferredInit();
             }
-            // MetaPanel 和 FilterPanel 暂时不需要延迟数据加载，因为它们通常随选中项动态刷新
         });
     }
     
@@ -1474,11 +1230,8 @@ void MainWindow::setupSplitters() {
         "QSplitter::handle:hover { background-color: %2; }" 
     ).arg(qssColor(BackgroundDeep)).arg(qssColor(BackgroundHover)));
 
-    m_categoryPanel = new CategoryPanel(this);
-    m_categoryPanel->setObjectName("SidebarContainer");
-    
     m_navPanel = new NavPanel(this);
-    m_navPanel->setObjectName("ListContainer");
+    m_navPanel->setObjectName("SidebarContainer");
     
     m_contentPanel = new ContentPanel(this);
     m_contentPanel->setObjectName("EditorContainer");
@@ -1495,36 +1248,19 @@ void MainWindow::setupSplitters() {
     // 2026-05-07 按照用户要求：焦点线持久化显示，基于数据来源而非焦点位置
     connect(m_contentPanel, &ContentPanel::dataSourceChanged, this, [this](const QString& source) {
         m_currentDataSource = source;
-        // 重置所有面板高亮
-        if (m_navPanel)      m_navPanel->setFocusHighlight(false);
-        if (m_categoryPanel) m_categoryPanel->setFocusHighlight(false);
-
-        // 根据数据来源显示焦点线
-        if (source == "category") {
-            if (m_categoryPanel) m_categoryPanel->setFocusHighlight(true);
-        } else if (source == "nav") {
-            if (m_navPanel) m_navPanel->setFocusHighlight(true);
-        }
-        // 其他来源（搜索、筛选等）不显示焦点线
+        if (m_navPanel) m_navPanel->setFocusHighlight(source == "nav");
     });
 
-    // 纯磁盘模式三栏布局：第一栏导航(NavPanel)，第二栏（内容区/原ArcMeta逻辑已纯化），第三栏元数据/筛选
+    // 纯磁盘模式三栏布局：第一栏导航(NavPanel)，第二栏内容区(ContentPanel)，第三栏元数据/筛选
     m_mainSplitter->addWidget(m_navPanel);
     m_mainSplitter->addWidget(m_contentPanel);
     m_mainSplitter->addWidget(m_metaPanel);
     m_mainSplitter->addWidget(m_filterPanel);
     m_mainSplitter->addWidget(m_tagManagerView);
 
-    // CategoryPanel 处于隐藏并禁用状态
-    m_categoryPanel->hide();
-
     // 2026-07-xx 按照用户要求：标签搜索联动
     connect(m_tagManagerView, &TagManagerView::requestSearchTag, this, [this](const QString& tag) {
-        // 自动切回正常模式并搜索
-        if (m_categoryPanel) m_categoryPanel->selectCategory(-1); // 选中“全部数据”
         if (m_searchEdit) m_searchEdit->setText(tag);
-        
-        // 【修复】走统一异步搜索管线，避免主线程 SQLite 查询卡顿
         CoreController::instance().performSearch(tag, "global", 0, "");
     });
 
@@ -1856,20 +1592,6 @@ void MainWindow::unifiedNavigateTo(const QString& url, bool record) {
             if (ok) ids.append(parsed);
         }
 
-        if (ids.size() == 1) {
-            int id = ids.first();
-            if (m_categoryPanel) {
-                m_categoryPanel->blockSignals(true);
-                m_categoryPanel->selectCategory(id);
-                m_categoryPanel->blockSignals(false);
-            }
-            if (m_contentPanel) m_contentPanel->loadCategory(id);
-            if (m_addressBar) m_addressBar->setPath("分类: " + name);
-        } else if (!ids.isEmpty()) {
-            // 多选场景，批量加载分类列表
-            if (m_contentPanel) m_contentPanel->loadCategories(ids);
-            if (m_addressBar) m_addressBar->setPath(name);
-        }
         m_currentPath = url; // 逻辑路径
     }
     else if (url.startsWith(kProtocolSystem)) {
@@ -1879,11 +1601,6 @@ void MainWindow::unifiedNavigateTo(const QString& url, bool record) {
         m_contentPanel->show(); // 基础显示
         loadPanelVisibility();
 
-        if (m_categoryPanel) {
-            m_categoryPanel->blockSignals(true);
-            m_categoryPanel->selectCategoryByType(type);
-            m_categoryPanel->blockSignals(false);
-        }
         if (m_contentPanel) {
             m_contentPanel->setCurrentCategoryType(type);
             m_contentPanel->loadPaths(CategoryRepo::getSystemCategoryPaths(type));
@@ -1979,9 +1696,6 @@ void MainWindow::onVolumeUnplugged(const QString& driveLetter) {
         unifiedNavigateTo("system://all");
     }
 
-    if (m_categoryPanel) {
-        m_categoryPanel->requestRefresh(true);
-    }
 }
 
 void MainWindow::onStatusBarStatsUpdated(int fileCount, int folderCount, int totalCount) {
@@ -2092,7 +1806,6 @@ void MainWindow::populatePanelMenu(QMenu* menu) {
         });
     };
 
-    addToggleAction("显示分类栏", m_categoryPanel);
     addToggleAction("显示目录导航", m_navPanel);
     addToggleAction("显示内容区", m_contentPanel, false); // 核心区锁定不可隐藏
     addToggleAction("显示元数据栏", m_metaPanel);
@@ -2109,7 +1822,6 @@ void MainWindow::resetSplitterLayout() {
     m_isTagManagerMode = false;
     m_tagManagerView->hide();
 
-    m_categoryPanel->show();
     m_navPanel->show();
     m_contentPanel->show();
     m_metaPanel->show();
@@ -2136,7 +1848,6 @@ void MainWindow::loadPanelVisibility() {
     if (!val.isValid()) return;
 
     QStringList hiddenPanels = val.toStringList();
-    if (hiddenPanels.contains("category")) m_categoryPanel->hide();
     if (hiddenPanels.contains("nav"))      m_navPanel->hide();
     if (hiddenPanels.contains("meta"))     m_metaPanel->hide();
     if (hiddenPanels.contains("filter"))   m_filterPanel->hide();
@@ -2150,7 +1861,6 @@ void MainWindow::savePanelVisibility() {
     }
 
     QStringList hiddenPanels;
-    if (!m_categoryPanel->isVisible()) hiddenPanels << "category";
     if (!m_navPanel->isVisible())      hiddenPanels << "nav";
     if (!m_metaPanel->isVisible())     hiddenPanels << "meta";
     if (!m_filterPanel->isVisible())   hiddenPanels << "filter";

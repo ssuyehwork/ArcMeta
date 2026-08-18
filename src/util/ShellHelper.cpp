@@ -16,7 +16,7 @@
 #include "../meta/MetadataManager.h"
 #include "../meta/CategoryRepo.h"
 #include "../meta/StatisticsService.h"
-#include "../meta/AmMetaJson.h"
+#include "../meta/QuarkMetaJson.h"
 
 namespace ArcMeta {
 
@@ -103,7 +103,7 @@ bool ShellHelper::copyOrMoveItems(const QStringList& sourcePaths, const QString&
             QFileInfo info(p);
             QString newPath = QDir(destDir).filePath(info.fileName());
             // 1. 物理漫游迁移 .QuarkMeta.json 元数据
-            AmMetaJson::migrateItemMetadata(p, newPath); 
+            QuarkMetaJson::migrateItemMetadata(p, newPath);
             // 2. 同步内存/数据库缓存 
             MetadataManager::instance().renameItem(p.toStdWString(), newPath.toStdWString());
         }
@@ -144,7 +144,7 @@ void ShellHelper::openInExplorer(const QString& path) {
 bool ShellHelper::renameItem(const QString& oldPath, const QString& newPath) {
     if (QFile::rename(oldPath, newPath)) {
         // 1. 物理漫游迁移 .QuarkMeta.json 元数据
-        AmMetaJson::migrateItemMetadata(oldPath, newPath);
+        QuarkMetaJson::migrateItemMetadata(oldPath, newPath);
         // 同步数据库
         MetadataManager::instance().renameItem(oldPath.toStdWString(), newPath.toStdWString());
         return true;

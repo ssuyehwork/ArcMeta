@@ -47,8 +47,8 @@ set(SOURCES
     src/main.cpp
     src/meta/sqlite3.c
     src/meta/sqlite3.h
-    src/meta/AmMetaJson.cpp
-    src/meta/AmMetaJson.h
+    src/meta/QuarkMetaJson.cpp
+    src/meta/QuarkMetaJson.h
     src/meta/DiskNavigatorService.cpp
     src/meta/DiskNavigatorService.h
     src/meta/StatisticsService.cpp
@@ -125,13 +125,8 @@ set(SOURCES
     src/ui/CategoryFilterProxyModel.h
     src/ui/BreadcrumbBar.cpp
     src/ui/BreadcrumbBar.h
-    src/ui/CategoryDelegate.h
     src/ui/CategoryLockDialog.cpp
     src/ui/CategoryLockDialog.h
-    src/ui/CategoryModel.cpp
-    src/ui/CategoryModel.h
-    src/ui/CategoryPanel.cpp
-    src/ui/CategoryPanel.h
     src/ui/CategorySetPasswordDialog.cpp
     src/ui/CategorySetPasswordDialog.h
     src/ui/CategoryLockWidget.cpp
