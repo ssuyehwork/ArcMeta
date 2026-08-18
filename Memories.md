@@ -1,0 +1,105 @@
+# 偏好记录 Memories.md
+
+# 0. 全局视觉与品牌规范
+- **品牌橙色 (BrandOrange)**: 物理色值为 **`#cb7208`**。该颜色仅用于 FERREX 品牌 Logo、标题栏名称文字等品牌识别元素。
+- **置顶激活色 (ActiveOrange)**: 物理色值为 **`#ff551c`**。该颜色用于全应用置顶激活按钮、内容面板置顶角标及侧边栏置顶状态。
+- **强制解耦**: 品牌色与置顶激活色必须独立，严禁共同引用同一个常量或色值。
+- **滑杆交互反馈**: 筛选面板中的百分比滑杆（如“占比”）必须支持实时数值回显，通过 `ToolTipOverlay` 在悬停或滑动时动态展示百分比，并在释放或离开时自动隐藏。
+
+# 标题栏按钮及布局标准规范
+
+## 1. 标题栏容器 (TitleBar)
+- **高度 (Height)**: 物理高度固定为 `34px`。
+- **布局边距 (ContentsMargins)**: `(5, 0, 5, 0)`
+  - 左侧边距: `5px`
+  - 右侧对齐: `5px` (物理对齐右侧边缘，由 kEdgeMargin 定义)
+- **全局间距 (Spacing)**: `5px` (应用名与按钮组之间的间距)。
+
+## 2. 按钮组容器 (TitleBarButtons Container)
+- **布局间距 (Spacing)**: 按钮与按钮之间的物理间距固定为 `5px`。
+- **布局边距 (ContentsMargins)**: `(0, 0, 0, 0)`。
+
+## 3. 按钮物理参数 (Button Parameters)
+- **外框尺寸 (FixedSize)**: `24x24px`。
+- **图标尺寸 (IconSize)**: `18x18px`。
+- **圆角 (BorderRadius)**: `4px`。
+- **背景样式**:
+  - 默认状态: `transparent` (透明)。
+  - 悬停状态 (Hover): `#3E3E42` (关闭按钮除外)。
+  - 按下状态 (Pressed): `#4E4E52`。
+
+## 4. 特殊按钮规范 (Special Buttons)
+- **关闭按钮 (Close Button)**:
+  - **全应用标准**: 所有界面（主窗口、面板、对话框、标签块）的关闭按钮必须保持视觉一致性。
+  - **背景颜色**: 默认状态为 `ErrorRed` (#e81123) (按照用户要求：持续显示红色高亮，不再仅悬停显示)。
+  - **悬停状态 (Hover)**: `ErrorRed` (#e81123)。
+  - **按下状态 (Pressed)**: `#A50000`。
+  - **圆角**: `4px`。
+- **置顶按钮 (Pin Button)**:
+  - **激活颜色**: 选中状态下图标颜色必须切换为唯一合法色值 **`#ff551c`** (对应常量 `ActiveOrange`)。杜绝任何形式的色值脑补。
+- **同步按钮 (Sync Button)**:
+  - **状态联动**: 存在待同步元数据时，图标强制显示为 `ErrorRed`；同步完成后恢复为 `TextMain`。
+
+## 5. 交互行为
+- 所有标题栏按钮必须开启 `Qt::WA_Hover` 属性以触发悬停事件。
+- 必须安装 `m_hoverFilter` 事件过滤器以支持全局 ToolTip 悬浮提醒。
+- 新建按钮 (+) 采用手动 `popup` 菜单模式，严禁使用 `setMenu` 以免破坏图标的绝对居中对齐。
+
+// ===================|===================
+
+# 6. 关于“清除”按钮
+## 6.1 每个可编辑的输入框必须配置上“Qt 原生的 setClearButtonEnabled(true)”，而且只可采用“Qt 原生的 setClearButtonEnabled(true)”，杜绝脑补另创 
+
+// ===================|===================
+
+# 7. 元数据管理与搜索规范
+## 7.1 隔离式多维关联索引
+- **机制**：`MetadataManager` 通过 `m_fileNameToFids`（仅文件）、`m_folderNameToFids`（仅文件夹）及 `m_extensionToFids`（仅后缀，小写，不含点）三个隔离的倒排索引管理名称关联。
+- **一致性**：在项目激活（`ensureActivated`）、重命名（`renameItem`）及删除（`removeMetadataSync`）时，必须同步维护上述三个索引映射。
+- **去重**：注册索引时须执行 `std::find` 检查，防止同一 FID 在同一键下重复注。
+
+## 7.2 “范围感知 (Scope-Aware)” 搜索
+- **核心逻辑**：搜索行为必须实时对标 UI 顶部的 **蓝色提示线 (Focus Line)** 位置。
+- **数据流**：搜索请求必须通过 `CoreController::performSearch` 转发，并携带当前的数据源范围参数（"category" 或 "nav"）。
+- **过滤准则**：
+    - **侧边栏模式**：限定在当前分类及其子类范围内（利用 `CategoryRepo::getItemsRecursive`）。
+    - **目录导航模式**：限定在当前物理磁盘路径及其子目录范围内（通过路径前缀匹配）。
+
+# 8. UI 异步加载与防闪烁规范
+- **原则**: 在内容面板（`ContentPanel`）进行异步数据扫描（如物理目录扫描、数据库分类查询）前，**禁止**先行调用 `m_model->clear()`。
+- **目的**: 避免在数据就绪前的空窗期内出现“白屏/黑屏”视觉抖动，保留旧数据直至新数据通过 `setRecords` 实现毫秒级原子替换。
+- **例外**: 当目标路径列表确定为空（如路径不存在或搜索重置）时，必须执行同步 `clear()` 以反馈真实状态。
+- **竞态保护**: 加载流程必须绑定 `m_loadRequestId`。在异步回调中，必须校验回调携带的 ID 是否与当前面板 ID 一致，否则丢弃结果以防止快速切换导致的数据串扰。
+
+# 9. 缩略图平滑加载规范 (Plan-108)
+- **原则**: 针对图形文件（图像、SVG等），在异步加载缩略图期间，`data()` 接口必须返回空图标 (`QIcon()`)。
+- **目的**: 拦截 Delegate 的默认图标绘制逻辑，防止出现“系统图标 -> 缩略图”的二段式闪烁抖动。
+- **视觉反馈**: `ThumbnailDelegate` 必须通过检测空图标状态，在单元格区域绘制轻量的灰色圆角矩形 (`#3A3A3A`) 作为占位背景，确保从占位态到内容态的过渡平滑且不突兀。
+
+# 10. 快速预览 (QuickLook) 规范 (Plan-109)
+- **原则**: 快速预览必须具备属性感知能力。针对文件夹、可执行文件 (.exe, .dll) 及压缩包 (.zip, .7z 等) 严禁打开预览窗口。
+- **画质**: 预览标准图像 (jpg, png, webp 等) 时必须加载全分辨率原图，并启用 `SmoothPixmapTransform` 以消除锯齿。
+- **样式**: 预览窗口内的滚动条样式必须严格遵循全局规范：宽度 10px、圆角 3px、背景透明、Handle 颜色对齐 `BorderColor` (#333333)。
+
+# 11. 快速预览 (QuickLook) 进阶规范 (Plan-109)
+- **拦截机制**: 必须采用“黑名单拦截+白名单准入”的双重防御机制。严禁预览文件夹、安装包 (.msi, .exe), 系统库 (.dll, .sys) 及各类压缩包。
+- **性能红线**: `renderImage` 在加载原图前必须检查文件物理大小。若超过 50MB，必须自动降级调用高清缩略图引擎以确保 UI 响应性能。
+- **画质保障**: `SmoothPixmapTransform` 必须全程开启，杜绝在高清屏下出现插值锯齿。
+
+# 12. 内容面板数据源判定与强类型契约规范 (Plan-123)
+- **核心定义**: 必须使用强类型枚举 `DataSourceType` 统一规范内容面板 (`ContentPanel`) 的显示数据源来源：
+  - `DiskNav`: 物理磁盘直接 I/O 直接扫描的导航模式 (m_currentCategoryType 为空)；
+  - `UserCategory`: 数据库驱动的用户自定义逻辑分类模型 (m_currentCategoryType == "user_category")；
+  - `SystemCategory`: 系统内置逻辑桶（全部、未分类、无标签、最近访问、垃圾箱）；
+  - `PathList`: 临时加载的静态路径集合（标签或搜索物理结果）；
+- **铁律 1 (杜绝拼写 Bug)**: 严禁在全应用任何 cpp 文件中随手写散落的弱类型字符串判定（如 `if (m_currentCategoryType == "all")`），判定数据源必须统一通过 `ContentPanel::dataSourceType()` 枚举接口，充分运用编译器在编译阶段进行类型强制安全检查。
+- **铁律 2 (统一辅助判定)**: `ContentPanel` 必须公开 `isMirrorSource()` (返回是否为逻辑/镜像源数据) 与 `isManagedContext()` (返回当前是否处于已激活的托管库内可读写 SQLite DB 的可信生命周期内)。
+- **铁律 3 (双轨标记落盘路由)**: 当打标或星级操作触发时，统一由数据源契约一键判断：
+  - 在托管库上下文 (`isManagedContext() == true`) 内，元数据 100% 写入统一 SQLite 本地数据库；
+  - 在库外普通磁盘模式 (`isManagedContext() == false`) 下，元数据自动调用 `AmMetaJson` 精准写入同级 `.ArcMeta.json` 离散缓存中，确保不污染用户原始物理盘。
+
+# 13. 关于媒体提取管道的线程安全边界
+## 13.1 Qt Gui API 禁止无保护地在 worker 线程并发调用
+- `MediaExtractorPipeline` 与 `CapsuleMediaExtractor` 所在的后台提取管道，任何会触碰 `QSvgRenderer`/`QPainter`/`QPixmap`/`QIcon` 等 Qt Gui 模块 API 的代码段，必须用 `CapsuleMediaExtractor::s_qtGuiMutex` 显式串行化保护，不允许多个 worker 线程并发执行这类代码。
+- 这类 API 不保证线程安全，并发访问会导致 `Qt6Gui.dll` 内部缓存越界写入，进程直接崩溃 (`0xC0000005`)。此约束不因新增图形格式支持、性能优化理由被绕过，新增任何调用这类 API 的代码前必须先复用此锁。
+- 文件 I/O、哈希计算、数据库读写等与 Qt Gui 无关的部分不受此约束，维持并行。

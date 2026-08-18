@@ -1,0 +1,63 @@
+{
+    "folder": {
+        "color": "",
+        "encrypted": false,
+        "file_id_128": "",
+        "note": "",
+        "pinned": false,
+        "rating": 0,
+        "sort_by": "name",
+        "sort_order": "asc",
+        "tags": [
+        ],
+        "url": ""
+    },
+    "items": {
+        "architectural_audit_report.md": {
+            "added_at": 0,
+            "auto_color": "",
+            "color": "",
+            "encrypt_iv": "",
+            "encrypt_salt": "",
+            "encrypt_verify_hash": "",
+            "encrypted": false,
+            "file_id_128": "",
+            "frn": "",
+            "height": 0,
+            "note": "",
+            "original_name": "",
+            "pinned": false,
+            "rating": 0,
+            "tags": [
+                "g:\\c++\\arcmeta\\arcmeta\\modification_plan\\architectural_audit_report.md"
+            ],
+            "type": "file",
+            "url": "",
+            "volume": "",
+            "width": 0
+        },
+        "modification_plan-3.md": {
+            "added_at": 0,
+            "auto_color": "",
+            "color": "#FECF0E",
+            "encrypt_iv": "",
+            "encrypt_salt": "",
+            "encrypt_verify_hash": "",
+            "encrypted": false,
+            "file_id_128": "",
+            "frn": "",
+            "height": 0,
+            "note": "",
+            "original_name": "",
+            "pinned": false,
+            "rating": 5,
+            "tags": [
+            ],
+            "type": "file",
+            "url": "",
+            "volume": "",
+            "width": 0
+        }
+    },
+    "version": "2"
+}
